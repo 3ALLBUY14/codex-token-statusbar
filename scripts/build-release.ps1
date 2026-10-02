@@ -11,12 +11,15 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $staging = $null
 Push-Location $root
 try {
-    $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+    $metadata = Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json
+    $version = $metadata.version
+    $displayVersion = if ($metadata.displayVersion) { $metadata.displayVersion } else { $version }
+    if ($displayVersion -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw 'Invalid display version.' }
     if (!$SkipPackage) { & npm.cmd run package -- --electron-zip-dir=artifacts; if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' } }
     $package = Join-Path $root 'dist\CodexTokenStatusbar-win32-x64'
     if (!(Test-Path -LiteralPath (Join-Path $package 'CodexTokenStatusbar.exe'))) { throw 'Packaged app is missing.' }
     $releaseRoot = Join-Path $root 'release'
-    $releaseName = 'CodexTokenStatusbar-' + $version + '-Windows-x64'
+    $releaseName = 'CodexTokenStatusbar-' + $displayVersion + '-Windows-x64'
     $release = Join-Path $releaseRoot $releaseName
     $zip = $release + '.zip'
     $sha = $zip + '.sha256'
@@ -38,7 +41,7 @@ try {
     Copy-Item -LiteralPath installer\install.cmd -Destination (Join-Path $workRelease '安装.cmd')
     Copy-Item -LiteralPath installer\uninstall.cmd -Destination $workRelease
     $instructions = @"
-Codex Token 状态条 $version — Windows x64
+Codex Token 状态条 $displayVersion — Windows x64
 
 安装：
 1. 先解压整个压缩包。
@@ -67,7 +70,7 @@ Codex Token 状态条 $version — Windows x64
     $files = @(Get-ChildItem -LiteralPath $appDirectory -File -Recurse | ForEach-Object {
         @{ path = $_.FullName.Substring($appDirectory.Length + 1); sha256 = (Get-StatusbarSha256 $_.FullName) }
     })
-    @{ version = $version; architecture = 'x64'; testedCodex = '26.930.2377.0'; files = $files } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $workRelease 'release.json') -Encoding UTF8
+    @{ version = $version; displayVersion = $displayVersion; architecture = 'x64'; testedCodex = '26.930.2377.0'; files = $files } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $workRelease 'release.json') -Encoding UTF8
     $workZip = Join-Path $staging ($releaseName + '.zip')
     Compress-Archive -LiteralPath $workRelease -DestinationPath $workZip -CompressionLevel Optimal
     (Get-StatusbarSha256 $workZip) + '  ' + [IO.Path]::GetFileName($zip) | Set-Content -LiteralPath ($workZip + '.sha256') -Encoding ASCII

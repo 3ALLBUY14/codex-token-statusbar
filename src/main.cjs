@@ -12,6 +12,7 @@ const { SettingsStore } = require('./settings.cjs');
 const { contextStatus } = require('./metrics.cjs');
 
 app.setName('Codex Token Statusbar');
+const displayVersion = require('../package.json').displayVersion ?? app.getVersion();
 const smoke = process.argv.includes('--smoke');
 const demo = process.argv.includes('--demo');
 const smokeAt = process.argv.indexOf('--artifacts');
@@ -38,7 +39,7 @@ let watcherWatchdog;
 function runtimeStatus() {
   const watcherRunning = Boolean(nativeWatcher?.pid && !nativeWatcher.killed);
   return {
-    version: app.getVersion(),
+    version: displayVersion,
     watcherRunning,
     watcherHealthy: watcherRunning && watcherLastSampleAt > 0 && Date.now() - watcherLastSampleAt < 7000,
     watcherLastSampleAt: watcherLastSampleAt || null,
@@ -309,7 +310,7 @@ function demoState() {
       lastTurn: { speed: { tokensPerSecond: 28.4, excludesFirstToken: true, includesToolTime: true }, durationMs: 52000, firstTokenMs: 2000, tokens: { output_tokens: 1420, total_tokens: 86420 }, status: 'completed', completedAt: new Date().toISOString() },
     },
     today: { day: new Date().toLocaleDateString('sv-SE'), usage: { total_tokens: 6280000 }, partial: false }, sessions: [],
-    runtime: { version: app.getVersion(), watcherRunning: true, watcherHealthy: true, watcherLastSampleAt: Date.now(), watcherError: null, codexForeground: true, overlayVisible: true, manuallyHidden: false, testMode: true },
+    runtime: { version: displayVersion, watcherRunning: true, watcherHealthy: true, watcherLastSampleAt: Date.now(), watcherError: null, codexForeground: true, overlayVisible: true, manuallyHidden: false, testMode: true },
   };
 }
 
@@ -332,7 +333,7 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 17 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== app.getVersion()) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 17 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   fs.writeFileSync(path.join(artifactDirectory, 'settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
   const settingsScroll = [];
   const settingsTypography = [];

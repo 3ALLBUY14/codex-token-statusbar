@@ -26,6 +26,7 @@ try {
     }
     $source = Join-Path $PSScriptRoot 'app'
     $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'release.json') -Raw | ConvertFrom-Json
+    $displayVersion = if ($manifest.displayVersion) { $manifest.displayVersion } else { $manifest.version }
     if (!(Test-Path -LiteralPath (Join-Path $source 'CodexTokenStatusbar.exe'))) { throw '安装文件不完整，请先解压整个安装包。' }
     foreach ($file in $manifest.files) {
         $payloadPath = [IO.Path]::GetFullPath((Join-Path $source $file.path))
@@ -37,7 +38,7 @@ try {
         Add-Type -AssemblyName System.Drawing
         [Windows.Forms.Application]::EnableVisualStyles()
         $form = New-Object Windows.Forms.Form
-        $form.Text = '安装 Codex Token 状态条 ' + $manifest.version
+        $form.Text = '安装 Codex Token 状态条 ' + $displayVersion
         $form.ClientSize = New-Object Drawing.Size(460, 250)
         $form.StartPosition = 'CenterScreen'
         $form.FormBorderStyle = 'FixedDialog'
@@ -106,7 +107,7 @@ try {
     elseif (Test-Path -LiteralPath $identity.Startup) { Remove-Item -LiteralPath $identity.Startup -Force }
     New-Item -Path $identity.Registry -Force | Out-Null
     $values = @{
-        DisplayName = $identity.Name; DisplayVersion = $manifest.version; Publisher = 'Codex Token Statusbar Community'
+        DisplayName = $identity.Name; DisplayVersion = $displayVersion; Publisher = 'Codex Token Statusbar Community'
         InstallLocation = $InstallRoot; DisplayIcon = $exe
         UninstallString = '"' + $powershell + '" ' + $uninstallArguments
         QuietUninstallString = '"' + $powershell + '" ' + $uninstallArguments + ' -Silent'
@@ -121,7 +122,7 @@ try {
         catch { Write-Warning '旧版备份未能清理；新版本已安装。' }
     }
     if (!$Silent) { try { [void][Windows.Forms.MessageBox]::Show('安装完成。打开 Codex 即可显示浮条；也可以从桌面或开始菜单启动。', 'Codex Token 状态条') } catch {} }
-    Write-Output ('Installed Codex Token Statusbar ' + $manifest.version)
+    Write-Output ('Installed Codex Token Statusbar ' + $displayVersion)
     exit 0
 } catch {
     $failure = $_

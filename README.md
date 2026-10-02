@@ -1,4 +1,4 @@
-# Codex Token 状态条（Windows）
+# Codex Token 状态条 V1（Windows）
 
 为 Codex 桌面版提供一个跟随窗口的独立浮条。基于
 [zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar)
@@ -15,7 +15,7 @@
 
 ## 开始使用
 
-从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-0.4.4-Windows-x64.zip`。
+从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1-Windows-x64.zip`。
 
 安装版：解压整个压缩包，双击 **`安装.cmd`**，选择是否开机启动和创建桌面入口，再点击“安装并启动”。安装到当前用户目录，无需管理员权限。可在 Windows“设置 → 应用”中卸载。
 

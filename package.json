@@ -1,6 +1,7 @@
 {
   "name": "codex-token-statusbar",
-  "version": "0.4.4",
+  "version": "1.0.0",
+  "displayVersion": "V1",
   "private": true,
   "description": "Local, read-only Codex Desktop token and context status bar, adapted from zcode-token-usage-statusbar.",
   "main": "src/main.cjs",
