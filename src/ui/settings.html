@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN" class="settings-document">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Codex Token 状态条设置</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="settings-page">
+  <main class="settings-content">
+    <h1>Codex Token 状态条</h1>
+    <p class="intro">跟随当前聊天，查看 Token 和上下文。鼠标进入浮条时自动半透明，点击 C 展开或收起明细。</p>
+    <section class="settings-group">
+      <h2>浮条显示项</h2>
+      <div class="check-grid">
+        <label><input type="checkbox" data-setting="showSpeed">平均输出速度</label>
+        <label><input type="checkbox" data-setting="showContext">上下文占用</label>
+        <label><input type="checkbox" data-setting="showSession">会话累计 Token</label>
+        <label><input type="checkbox" data-setting="showTurn">本轮 / 上轮 Token</label>
+        <label><input type="checkbox" data-setting="showToday">今日 Token</label>
+        <label><input type="checkbox" data-setting="showCache">缓存命中率</label>
+        <label><input type="checkbox" data-setting="showTools">工具调用</label>
+      </div>
+      <label class="drag-option"><input type="checkbox" data-setting="hideLabels">隐藏浮条文字</label>
+      <p class="settings-note">隐藏指标名称和跟随状态，保留数值、进度条及 C、设置按钮；明细仍显示完整文字。</p>
+    </section>
+    <section class="settings-group">
+      <h2>位置与外观</h2>
+      <div class="setting-row"><label for="placement">跟随窗口的位置</label><select id="placement" data-setting="placement"><option value="top-right">右上方</option><option value="bottom-right">右下方</option><option value="bottom-center">底部居中</option></select></div>
+      <div class="setting-row"><label for="theme">主题</label><select id="theme" data-setting="theme"><option value="system">跟随 Windows</option><option value="dark">深色</option><option value="light">浅色</option></select></div>
+      <div class="setting-row"><label for="scale">缩放</label><select id="scale" data-setting="scale"><option value="0.75">75%</option><option value="0.85">85%</option><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option><option value="1.5">150%</option></select></div>
+      <label class="drag-option"><input type="checkbox" data-setting="allowDrag">允许自由拖动浮条</label>
+      <p class="settings-note">开启后拖动浮条的指标或空白处，松开鼠标自动保存位置。C 和设置按钮仍可点击。</p>
+      <div class="setting-row"><label for="offsetX">水平偏移</label><input id="offsetX" type="number" min="-20000" max="20000" step="10" data-setting="offsetX"></div>
+      <div class="setting-row"><label for="offsetY">垂直偏移</label><input id="offsetY" type="number" min="-20000" max="20000" step="10" data-setting="offsetY"></div>
+      <label><input type="checkbox" data-setting="alwaysVisible">切换到其他应用时仍显示</label>
+    </section>
+    <section class="settings-group">
+      <h2>聊天与上下文</h2>
+      <p class="status-line" id="connection">连接中…</p>
+      <select class="full-select" id="chat" data-setting="pinnedThreadId"><option value="">自动跟随当前聊天</option></select>
+      <div class="setting-row"><label for="contextOverride">手动窗口容量</label><input id="contextOverride" type="number" min="1000" max="10000000" step="1000" placeholder="自动" data-setting="contextOverride"></div>
+      <p class="settings-note">容量留空则使用日志记录的值。100 万 Token 以下的窗口在 70% / 85% 预警，100 万及以上在 40% / 60% 预警。多个 Codex 窗口同时打开时，可锁定一个聊天，避免混用数据。</p>
+    </section>
+    <section class="settings-group">
+      <h2>速度怎么算</h2>
+      <p class="settings-note">上一轮输出 Token ÷（轮次耗时－首 Token 延迟）。缺少首 Token 时间时按完整耗时计算。包含推理输出、工具执行和多次模型调用，因此标记为平均输出速度，而不是纯模型生成速度。</p>
+      <p class="settings-note">所有统计来自本机日志，缓存输入和推理输出不会重复计入总量。这里的 Token 用量不等同于套餐额度或账单。</p>
+    </section>
+    <section class="settings-group" aria-label="运行诊断">
+      <h2>运行诊断</h2>
+      <div class="diagnostic-rows">
+        <div><span>版本</span><strong id="diag-version">—</strong></div>
+        <div><span>聊天连接</span><strong id="diag-connection">—</strong></div>
+        <div><span>识别方式</span><strong id="diag-source">—</strong></div>
+        <div><span>当前聊天</span><strong id="diag-title">—</strong></div>
+        <div><span>窗口跟随</span><strong id="diag-window">—</strong></div>
+        <div><span>跟随助手心跳</span><strong id="diag-window-updated">—</strong></div>
+        <div><span>浮条状态</span><strong id="diag-overlay">—</strong></div>
+        <div><span>本地日志</span><strong id="diag-logs">—</strong></div>
+        <div><span>Token 更新时间</span><strong id="diag-updated">—</strong></div>
+      </div>
+      <p class="settings-note" id="diag-advice"></p>
+    </section>
+    <p id="save-status" aria-live="polite"></p>
+    <div class="actions"><button class="action-button" id="refresh">重新检测与刷新</button><button class="action-button" id="restore-position">恢复浮条位置</button><button class="action-button" id="reset">恢复默认显示</button><button class="action-button" id="quit">退出状态条</button></div>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Codex Token 状态条</title>
+  <link rel="stylesheet" href="upstream.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell" id="shell">
+    <div class="zusage-root statusbar" id="bar">
+      <button class="identity btn" data-action="details" aria-label="展开或收起明细" aria-expanded="false"><span class="brand-mark">C</span><span class="route" id="route">连接中</span></button>
+      <span class="sep"></span>
+      <div class="zu-main" id="metrics">
+        <div class="it metric" data-metric="speed"><span class="k">均速</span><span class="v ok" id="speed">—</span><span class="dim">t/s</span></div>
+        <div class="it metric" data-metric="context"><span class="k">上下文</span><span class="cbar" id="context-bar"><i id="context-fill"></i></span><span class="pct" id="context">—</span></div>
+        <div class="it metric" data-metric="session"><span class="k">会话</span><span class="v" id="session">—</span></div>
+        <div class="it metric" data-metric="turn"><span class="k" id="turn-label">本轮</span><span class="v" id="turn">—</span></div>
+        <div class="it metric" data-metric="today"><span class="k">今日</span><span class="v" id="today">—</span></div>
+        <div class="it metric" data-metric="cache"><span class="k">缓存</span><span class="v" id="cache">—</span></div>
+        <div class="it metric" data-metric="tools"><span class="k">工具</span><span class="v" id="tools">—</span><span class="tool-failed" id="tool-failed"></span></div>
+      </div>
+      <span class="more-count" id="more-count" hidden aria-label="其余指标请点击 C 查看明细"></span>
+      <span class="sep"></span>
+      <span class="activity" id="activity" aria-label="当前聊天活动状态">●</span>
+      <button class="btn zu-gear" data-action="settings" aria-label="设置">⚙</button>
+    </div>
+    <section class="panel details" id="details" aria-label="用量明细">
+      <div class="detail-heading"><div><strong>当前聊天</strong><span class="pver" id="binding">等待数据</span></div><span class="dim">点击 C 收起</span></div>
+      <p class="chat-title" id="chat-title" hidden></p>
+      <div class="model-line"><span id="model">—</span><span class="dim" id="thread">—</span></div>
+      <div class="numbers">
+        <div><span>输入 Token</span><strong id="input-detail">—</strong></div>
+        <div><span>缓存输入 <small>已包含在输入中</small></span><strong id="cached-detail">—</strong></div>
+        <div><span>输出 Token</span><strong id="output-detail">—</strong></div>
+        <div><span>推理输出 <small>已包含在输出中</small></span><strong id="reasoning-detail">—</strong></div>
+        <div class="total-row"><span>会话累计 <small>输入＋输出</small></span><strong id="total-detail">—</strong></div>
+        <div><span>上下文 <small id="context-origin">最新调用</small></span><strong id="context-detail">—</strong></div>
+        <div><span>上一轮耗时 / 首 Token</span><strong id="time-detail">—</strong></div>
+        <div><span>上一轮平均输出速度</span><strong id="speed-detail">—</strong></div>
+        <div><span id="turn-requests-label">上轮模型请求</span><strong id="turn-requests-detail">—</strong></div>
+        <div><span id="turn-tools-label">上轮工具调用</span><strong id="turn-tools-detail">—</strong></div>
+        <div><span>工具调用 <small>已记录的完成项</small></span><strong id="tools-detail">—</strong></div>
+      </div>
+      <div class="tool-breakdown" id="turn-tool-breakdown"></div>
+      <div class="tool-breakdown" id="tool-breakdown"></div>
+      <div class="overflow-list" id="overflow-list" hidden></div>
+      <p class="speed-note" id="speed-note">平均速度包含工具执行和多次模型调用，不能代表纯生成速度。</p>
+      <p class="state-note" id="state-note"></p>
+      <div class="detail-footer"><span id="updated">只读本地日志</span><button class="btn" data-action="refresh">刷新</button></div>
+    </section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

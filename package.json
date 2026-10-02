@@ -1,0 +1,22 @@
+{
+  "name": "codex-token-statusbar",
+  "version": "0.4.4",
+  "private": true,
+  "description": "Local, read-only Codex Desktop token and context status bar, adapted from zcode-token-usage-statusbar.",
+  "main": "src/main.cjs",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/3ALLBUY14/codex-token-statusbar.git" },
+  "bugs": { "url": "https://github.com/3ALLBUY14/codex-token-statusbar/issues" },
+  "homepage": "https://github.com/3ALLBUY14/codex-token-statusbar#readme",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "diagnose": "node scripts/diagnose.cjs",
+    "package": "electron-packager . CodexTokenStatusbar --platform=win32 --arch=x64 --out=dist --overwrite --asar --extra-resource=scripts/window-watch.ps1 --ignore=\"^/(dist|release|installer|test|artifacts|docs|.github|.git|node_modules/.cache)(/|$)\"",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.5.1"
+  }
+}

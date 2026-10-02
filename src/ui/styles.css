@@ -1,0 +1,119 @@
+:root {
+  color-scheme: dark;
+  --color-background: #0f1219;
+  --color-card: #13161e;
+  --color-foreground: #e9edf4;
+  --color-foreground-subtle: #9ba5b6;
+  --color-foreground-subtlest: #758094;
+  --color-border: rgba(255,255,255,.10);
+  --color-hover: rgba(255,255,255,.065);
+  --color-brand: #57c7ff;
+}
+:root.light {
+  color-scheme: light;
+  --color-background: #f6f7fa;
+  --color-card: #fff;
+  --color-foreground: #182230;
+  --color-foreground-subtle: #536173;
+  --color-foreground-subtlest: #758094;
+  --color-border: rgba(24,34,48,.14);
+  --color-hover: rgba(24,34,48,.06);
+  --color-brand: #167da8;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; overflow: hidden; }
+body { color: var(--color-foreground); font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; }
+button { font: inherit; border: 0; background: none; color: inherit; }
+button:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+.shell { display: inline-flex; flex-direction: column; align-items: stretch; gap: 9px; padding: 8px; max-width: 100vw; }
+.shell.bottom .statusbar { order: 2; }
+.shell.bottom .details { order: 1; }
+.statusbar.zusage-root { position: relative; width: max-content; max-width: calc(100vw - 16px); padding: 5px 7px; min-height: 36px; font-size: 13px; backdrop-filter: none; }
+.statusbar { transition: opacity 160ms ease; }
+.statusbar.pointer-near { opacity: .45; }
+.statusbar.draggable, .statusbar.draggable .metric { cursor: grab; user-select: none; touch-action: none; }
+.statusbar.dragging, .statusbar.dragging .metric { cursor: grabbing; }
+.drag-option { margin-top: 16px; font-size: 13px; }
+.identity { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.brand-mark { font-weight: 700; font-size: 13px; color: var(--color-foreground); }
+.route { font-size: 11px; color: var(--color-foreground-subtle); }
+.it { padding: 3px 7px; gap: 5px; }
+.metric { cursor: default; flex-shrink: 0; }
+.metric[hidden] { display: none; }
+.metric.overflowed { display: none; }
+.more-count { flex-shrink: 0; color: var(--color-brand); font-size: 11px; font-weight: 700; padding: 0 4px; }
+.more-count[hidden], .overflow-list[hidden] { display: none; }
+.overflow-list { border-top: 1px solid var(--color-border); padding-top: 7px; display: grid; gap: 4px; font-size: 11px; }
+.overflow-list > div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); gap: 12px; }
+.overflow-list strong { color: var(--color-foreground); text-align: right; overflow-wrap: anywhere; }
+.statusbar .k { color: var(--color-foreground-subtle); }
+.tool-failed { color: var(--color-destructive, #ff6b68); font-weight: 700; font-variant-numeric: tabular-nums; }
+.tool-breakdown { display: grid; gap: 5px; font-size: 12px; color: var(--color-foreground-subtle); }
+.tool-breakdown div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); gap: 12px; }
+.tool-breakdown strong { color: var(--color-foreground); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
+.tool-section-title { color: var(--color-foreground-subtlest); border-top: 1px solid var(--color-border); padding-top: 5px; }
+.activity { margin: 0 4px; color: var(--color-foreground-subtlest); font-size: 9px; }
+.activity.busy { color: #57c7ff; animation: zupulse 1.6s ease-in-out infinite; }
+.activity.done { color: #3ecf8e; }
+.details.panel { position: relative; width: 100%; min-width: 0; max-width: none; max-height: 480px; padding: 15px 16px; font-size: 12px; font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif; backdrop-filter: none; left: auto; bottom: auto; gap: 10px; }
+.detail-heading, .detail-heading > div { display: flex; align-items: center; gap: 8px; }
+.detail-heading { justify-content: space-between; }
+.detail-heading strong { font-size: 14px; }
+.chat-title { margin: 0; color: var(--color-foreground-subtle); line-height: 1.6; overflow-wrap: anywhere; }
+.chat-title[hidden] { display: none; }
+.model-line { display: flex; justify-content: space-between; gap: 12px; font-family: Consolas, monospace; font-size: 12px; }
+.numbers { display: grid; gap: 7px; }
+.numbers > div { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 12px; align-items: start; }
+.numbers > div > span { color: var(--color-foreground-subtle); min-width: 0; }
+.numbers strong { font-family: Consolas, monospace; font-variant-numeric: tabular-nums; min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: right; }
+.numbers small { font-size: 10px; color: var(--color-foreground-subtlest); margin-left: 4px; }
+.total-row { border-top: 1px solid var(--color-border); padding-top: 8px; }
+.speed-note { margin: 0; padding: 9px 11px; border-radius: 7px; background: var(--color-hover); color: var(--color-foreground-subtle); line-height: 1.65; }
+.state-note { margin: 0; color: #f5b944; font-size: 11px; line-height: 1.6; }
+.state-note:empty { display: none; }
+.detail-footer { display: flex; justify-content: space-between; align-items: center; color: var(--color-foreground-subtlest); font-size: 11px; }
+.light .ok { color: #0f9d6c; }
+.light .warm { color: #b6791a; }
+.light .hot { color: #d8482f; }
+.light .activity.done { color: #0f9d6c; }
+
+/* The overlay is clipped; the settings document owns its viewport scrolling. */
+html.settings-document { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+body.settings-page { overflow: visible; min-height: 100vh; background: var(--color-background); font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', 'Segoe UI', sans-serif; font-size: 13px; line-height: 1.6; }
+.settings-content { max-width: 660px; margin: 0 auto; padding: 28px; }
+.settings-content h1 { font-size: 21px; margin: 0 0 7px; letter-spacing: -.4px; }
+.settings-content .intro { color: var(--color-foreground-subtle); font-size: 13px; line-height: 1.7; margin: 0 0 22px; }
+.settings-group { background: var(--color-card); border: 1px solid var(--color-border); border-radius: 11px; padding: 16px; margin: 0 0 14px; }
+.settings-group h2 { margin: 0 0 13px; font-size: 14px; }
+.diagnostic-rows { display: grid; }
+.diagnostic-rows > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; align-items: start; padding: 7px 0; }
+.diagnostic-rows > div + div { border-top: 1px solid var(--color-border); }
+.diagnostic-rows span { color: var(--color-foreground-subtle); white-space: nowrap; }
+.diagnostic-rows strong { min-width: 0; font: inherit; font-variant-numeric: tabular-nums; text-align: left; overflow-wrap: anywhere; }
+.check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px; }
+.settings-group label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+input[type=checkbox] { accent-color: var(--color-brand); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 12px 0; font-size: 13px; }
+select, input[type=number] { border: 1px solid var(--color-border); color: var(--color-foreground); background: var(--color-background); border-radius: 6px; padding: 6px 8px; font: inherit; }
+select { max-width: 300px; }
+input[type=number] { width: 112px; }
+.full-select { display: block; width: 100%; max-width: none; }
+.settings-note { color: var(--color-foreground-subtle); font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
+.status-line { color: var(--color-foreground-subtle); font-size: 12px; margin-bottom: 12px; }
+.actions { display: flex; gap: 10px; justify-content: space-between; }
+.action-button { cursor: pointer; background: var(--color-hover); border: 1px solid var(--color-border); border-radius: 7px; padding: 8px 12px; font-size: 12px; }
+.action-button:hover { border-color: var(--color-brand); }
+@media (max-width: 520px) {
+  .settings-content { padding: 22px 20px; }
+  .diagnostic-rows > div { grid-template-columns: 112px minmax(0, 1fr); gap: 12px; }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+#save-status { color: #ff6b57; font-size: 12px; min-height: 18px; }
+@media (prefers-reduced-motion: reduce) { .activity.busy { animation: none; } }
+.shell.compact .statusbar .k, .shell.compact .statusbar .route { display: none; }
+.shell.hide-labels .statusbar .k, .shell.hide-labels .statusbar .route { display: none; }
+.shell.compact .statusbar .it { padding: 3px 4px; }
+.shell.compact .statusbar .cbar { width: 24px; }
+.shell.compact .numbers small { display: none; }
+.shell.compact .numbers > div, .shell.compact .tool-breakdown div, .shell.compact .overflow-list > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.shell.compact .numbers strong, .shell.compact .tool-breakdown strong, .shell.compact .overflow-list strong { text-align: left; }
