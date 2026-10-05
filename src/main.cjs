@@ -65,12 +65,13 @@ function publish() {
     try {
       fs.mkdirSync(artifactDirectory, { recursive: true });
       fs.writeFileSync(path.join(artifactDirectory, 'running-health.json'), JSON.stringify({
-        pid: process.pid, updatedAt: new Date().toISOString(), ipcConnected: ipc.connected,
+        pid: process.pid, version: displayVersion, updatedAt: new Date().toISOString(), ipcConnected: ipc.connected,
         selected: Boolean(latest.selection.threadId), routeCount: ipc.routes.size,
         selectionSource: latest.selection.source, navigationKnown: navigation?.status().known ?? false,
         selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false,
         pinned: Boolean(settings.value.pinnedThreadId),
         watcherRunning: latest.runtime.watcherRunning, watcherHealthy: latest.runtime.watcherHealthy,
+        toolsTotal: latest.session?.toolUsage?.total ?? 0, toolsRecords: latest.session?.toolUsage?.records?.length ?? 0,
       }, null, 2));
     } catch { /* Optional diagnostics must not interrupt the overlay. */ }
   }
@@ -296,6 +297,17 @@ function buildTray() {
 }
 
 function demoState() {
+  const toolRecords = Array.from({ length: 17 }, (_, i) => ({
+    sequence: i + 1, type: i < 11 ? 'CommandExecution' : 'FileChange', label: i < 11 ? '命令执行' : '文件修改',
+    status: i === 5 ? 'failed' : 'completed', timestamp: '2026-10-05T08:00:00Z',
+    durationMs: i < 9 ? i === 0 ? 3000 : 1000 : i >= 11 && i < 14 ? 1000 : null,
+    exitCode: i < 11 ? i === 5 ? 1 : 0 : null,
+  }));
+  const turnRecords = [
+    { sequence: 1, type: 'CommandExecution', label: '命令执行', status: 'failed', timestamp: '2026-10-05T08:00:00Z', durationMs: 2800, exitCode: 1 },
+    { sequence: 2, type: 'CommandExecution', label: '命令执行', status: 'completed', timestamp: '2026-10-05T08:00:00Z', durationMs: 0, exitCode: 0 },
+    { sequence: 3, type: 'FileChange', label: '文件修改', status: 'completed', timestamp: '2026-10-05T08:00:00Z', durationMs: null, exitCode: null },
+  ];
   return {
     settings: { ...settings.value, showTurn: true, showToday: true }, dark: true,
     selection: { mode: 'following', connected: true, threadId: '00000000-0000-0000-0000-000000000001', routeCount: 1, title: 'Codex Token 状态条 · 演示聊天', source: 'desktop-navigation' },
@@ -304,8 +316,8 @@ function demoState() {
       threadId: '00000000-0000-0000-0000-000000000001', model: 'Codex', hasUsage: true, active: false, updatedAt: new Date().toISOString(),
       totals: { input_tokens: 1820000, cached_input_tokens: 1430000, output_tokens: 24000, reasoning_output_tokens: 8500, total_tokens: 1844000 },
       context: { used: 114400, capacity: 258400, percent: 44.2724, ...contextStatus(44.2724, 258400), exceeded: false }, cacheHitPercent: 78.57,
-      toolUsage: { total: 17, failed: 1, durationMs: 14000, timed: 12, byType: [{ type: 'CommandExecution', label: '命令执行', total: 11, failed: 1, durationMs: 11000, timed: 9 }, { type: 'FileChange', label: '文件修改', total: 6, failed: 0, durationMs: 3000, timed: 3 }] },
-      turnToolUsage: { total: 3, failed: 1, durationMs: 2800, timed: 2, byType: [{ type: 'CommandExecution', label: '命令执行', total: 2, failed: 1, durationMs: 2800, timed: 2 }, { type: 'FileChange', label: '文件修改', total: 1, failed: 0, durationMs: 0, timed: 0 }] }, turnRequests: 2,
+      toolUsage: { total: 17, failed: 1, durationMs: 14000, timed: 12, records: toolRecords, byType: [{ type: 'CommandExecution', label: '命令执行', total: 11, failed: 1, durationMs: 11000, timed: 9 }, { type: 'FileChange', label: '文件修改', total: 6, failed: 0, durationMs: 3000, timed: 3 }] },
+      turnToolUsage: { total: 3, failed: 1, durationMs: 2800, timed: 2, records: turnRecords, byType: [{ type: 'CommandExecution', label: '命令执行', total: 2, failed: 1, durationMs: 2800, timed: 2 }, { type: 'FileChange', label: '文件修改', total: 1, failed: 0, durationMs: 0, timed: 0 }] }, turnRequests: 2,
       turnTokens: { input_tokens: 85000, output_tokens: 1420, total_tokens: 86420 }, turnCount: 12,
       lastTurn: { speed: { tokensPerSecond: 28.4, excludesFirstToken: true, includesToolTime: true }, durationMs: 52000, firstTokenMs: 2000, tokens: { output_tokens: 1420, total_tokens: 86420 }, status: 'completed', completedAt: new Date().toISOString() },
     },
@@ -334,6 +346,33 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
   if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 17 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
+    document.getElementById('open-tool-details').click();
+    const list = document.getElementById('settings-tool-records');
+    const sessionCount = list.children.length;
+    const scope = document.getElementById('tool-scope');
+    scope.value = 'turn'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+    const turnCount = list.children.length;
+    const failed = document.getElementById('tool-failed-only');
+    failed.checked = true; failed.dispatchEvent(new Event('change', { bubbles: true }));
+    const failedCount = list.children.length;
+    const failedStatus = list.innerText.includes('退出码 1') && list.innerText.includes('失败');
+    failed.checked = false; failed.dispatchEvent(new Event('change', { bubbles: true }));
+    const unknownDuration = list.innerText.includes('未记录') && list.innerText.includes('0.0s');
+    scope.value = 'session'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+    return { expanded: document.getElementById('tool-details').open, sessionCount, turnCount, failedCount, failedStatus, unknownDuration };
+  })()`);
+  if (!toolDetails.expanded || toolDetails.sessionCount !== 17 || toolDetails.turnCount !== 3 || toolDetails.failedCount !== 1 || !toolDetails.failedStatus || !toolDetails.unknownDuration) throw new Error('Settings tool details failed: ' + JSON.stringify(toolDetails));
+  const emptyToolState = demoState();
+  emptyToolState.selection = { ...emptyToolState.selection, mode: 'empty', threadId: null, title: null };
+  emptyToolState.session = null;
+  settingsWindow.webContents.send('statusbar:snapshot', emptyToolState);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  toolDetails.emptyCleared = await settingsWindow.webContents.executeJavaScript("document.getElementById('settings-tool-records').children.length === 0 && document.getElementById('settings-tool-groups').children.length === 0 && document.getElementById('tool-chat').textContent.includes('暂无聊天')");
+  if (!toolDetails.emptyCleared) throw new Error('Previous tool records remained on an empty chat');
+  settingsWindow.webContents.send('statusbar:snapshot', demoState());
+  await new Promise(resolve => setTimeout(resolve, 200));
+  await settingsWindow.webContents.executeJavaScript('document.getElementById("tool-details").open = false; window.scrollTo(0, 0)');
   fs.writeFileSync(path.join(artifactDirectory, 'settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
   const settingsScroll = [];
   const settingsTypography = [];
@@ -370,6 +409,17 @@ async function smokeCheck() {
     settingsTypography.push({ size, ...typography });
     if (!typography.fits || !typography.valuesAligned || !typography.pageFits) throw new Error('Settings text overlaps or overflows: ' + JSON.stringify(settingsTypography.at(-1)));
     fs.writeFileSync(path.join(artifactDirectory, 'settings-bottom-' + size.width + '.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
+    const toolsFit = await settingsWindow.webContents.executeJavaScript(`(() => {
+      const details = document.getElementById('tool-details'); details.open = true;
+      document.getElementById('tool-details-heading').scrollIntoView();
+      const table = document.querySelector('.tool-table-wrap');
+      const records = document.getElementById('settings-tool-records');
+      return { pageFits: document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth, tableFits: table.scrollWidth <= table.clientWidth + 1, recordsFit: records.scrollWidth <= records.clientWidth + 1 };
+    })()`);
+    if (!toolsFit.pageFits || !toolsFit.tableFits || !toolsFit.recordsFit) throw new Error('Settings tool details overflow: ' + JSON.stringify(toolsFit));
+    toolDetails[size.width] = toolsFit;
+    fs.writeFileSync(path.join(artifactDirectory, 'settings-tools-' + size.width + '.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
+    await settingsWindow.webContents.executeJavaScript('document.getElementById("tool-details").open = false; window.scrollTo(0, document.scrollingElement.scrollHeight)');
   }
   fs.writeFileSync(path.join(artifactDirectory, 'settings-bottom.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
   const previousSettings = { ...settings.value };
@@ -418,7 +468,7 @@ async function smokeCheck() {
   const expandedAgain = await overlay.webContents.executeJavaScript("!document.getElementById('shell').classList.contains('compact') && getComputedStyle(document.querySelector('.statusbar .k')).display !== 'none'");
   if (!narrow.compact || narrow.hidden < 1 || !narrow.barFits || !narrow.metricsFit || narrow.detailsList !== narrow.hidden || !expandedAgain) throw new Error('Window resizing did not preserve all metric access: ' + JSON.stringify(narrow));
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
-  const report = { layout, settingsLayout, settingsScroll, settingsTypography, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
+  const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
   fs.writeFileSync(path.join(artifactDirectory, 'smoke-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ smoke: 'passed', health: report.health, ipcConnected: report.ipcConnected, selectionMode: report.selectionMode, overflow: layout.overflow }));
   app.quit();

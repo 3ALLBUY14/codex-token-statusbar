@@ -1,7 +1,71 @@
 'use strict';
 const api = window.codexStatusbar;
 let lastList = '';
+let toolState = null;
+let lastToolRender = '';
+let lastToolContext = '';
+const formatCount = value => Number.isFinite(value) ? value.toLocaleString('zh-CN') : '—';
+const formatDuration = value => Number.isFinite(value) ? `${(value / 1000).toFixed(1)}s` : '未记录';
+
+function renderTools() {
+  if (!toolState) return;
+  const state = toolState;
+  const session = state.session;
+  const turn = document.getElementById('tool-scope').value === 'turn';
+  const failedOnly = document.getElementById('tool-failed-only').checked;
+  const stats = turn ? session?.turnToolUsage : session?.toolUsage;
+  const signature = JSON.stringify([state.selection, stats, session?.active, turn, failedOnly]);
+  if (signature === lastToolRender) return;
+  lastToolRender = signature;
+  const modes = { following: '跟随当前聊天', pinned: '已锁定聊天', recent: '最近活跃聊天', empty: '当前页面暂无聊天数据', ambiguous: '请先选择聊天', unbound: '等待聊天数据' };
+  document.getElementById('tool-chat').textContent = [modes[state.selection.mode], state.selection.title ?? session?.model].filter(Boolean).join(' · ');
+  document.getElementById('tool-turn-option').textContent = session?.active ? '本轮' : '上一轮';
+  const summary = stats ? `${formatCount(stats.total)} 次 · 失败 ${formatCount(stats.failed)} 次` : '暂无调用数据';
+  document.getElementById('tool-details-summary').textContent = `查看分类与调用记录 · ${summary}`;
+  document.getElementById('tool-stats').textContent = stats ? `${turn ? session.active ? '本轮' : '上一轮' : '会话累计'} ${summary} · 有耗时记录 ${formatCount(stats.timed)} 次 / ${formatDuration(stats.durationMs)}` : '当前范围暂无已完成的工具调用。';
+  const groups = document.getElementById('settings-tool-groups');
+  groups.replaceChildren();
+  for (const group of stats?.byType ?? []) {
+    const row = document.createElement('tr');
+    for (const value of [group.label, formatCount(group.total), formatCount(group.failed), formatCount(group.timed), group.timed ? formatDuration(group.durationMs) : '未记录']) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.append(cell);
+    }
+    groups.append(row);
+  }
+  const records = stats?.records ?? [];
+  const visible = [...records].reverse().filter(record => !failedOnly || record.status === 'failed');
+  document.getElementById('tool-record-note').textContent = `保留当前范围最近 200 条完成记录，汇总统计包含全部调用。${stats?.total > records.length ? ` 当前保留 ${records.length} / ${formatCount(stats.total)} 条。` : ''}`;
+  const list = document.getElementById('settings-tool-records');
+  const context = JSON.stringify([state.selection.threadId, turn, failedOnly]);
+  const scrollTop = context === lastToolContext ? list.scrollTop : 0;
+  lastToolContext = context;
+  list.replaceChildren();
+  for (const record of visible) {
+    const row = document.createElement('li');
+    const heading = document.createElement('div');
+    heading.className = 'tool-record-top';
+    const name = document.createElement('strong');
+    name.textContent = `#${formatCount(record.sequence)} ${record.label}`;
+    const status = document.createElement('span');
+    status.className = `tool-record-status${record.status === 'failed' ? ' failed' : ''}`;
+    status.textContent = record.status === 'failed' ? '失败' : '已完成';
+    heading.append(name, status);
+    const metadata = document.createElement('p');
+    metadata.className = 'tool-record-meta';
+    const timestamp = record.timestamp ? new Date(record.timestamp).toLocaleString('zh-CN', { hour12: false }) : '完成时间未记录';
+    metadata.textContent = `${timestamp} · 耗时 ${formatDuration(record.durationMs)}${record.exitCode !== null && record.exitCode !== undefined ? ` · 退出码 ${record.exitCode}` : ''}`;
+    row.append(heading, metadata);
+    list.append(row);
+  }
+  list.scrollTop = scrollTop;
+  document.getElementById('tool-empty').textContent = visible.length ? '' : !stats?.total ? '暂无已完成的工具调用；运行中的调用会在完成后显示。' : failedOnly ? '保留的记录中没有失败调用。' : '暂无可显示的完成记录。';
+}
+
 api.onSnapshot(state => {
+  toolState = state;
+  renderTools();
   document.documentElement.classList.toggle('light', !state.dark);
   for (const input of document.querySelectorAll('[data-setting]')) {
     if (input === document.activeElement || input.id === 'chat') continue;
@@ -49,6 +113,9 @@ document.addEventListener('change', event => {
   save({ [key]: value });
 });
 document.getElementById('refresh').addEventListener('click', () => api.refresh());
+document.getElementById('tool-scope').addEventListener('change', renderTools);
+document.getElementById('tool-failed-only').addEventListener('change', renderTools);
+document.getElementById('open-tool-details').addEventListener('click', () => { document.getElementById('tool-details').open = true; });
 document.getElementById('restore-position').addEventListener('click', () => api.restorePosition());
 document.getElementById('quit').addEventListener('click', () => api.quit());
 document.getElementById('reset').addEventListener('click', () => save({ theme: 'system', placement: 'top-right', scale: 1, alwaysVisible: false, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null, offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false }));

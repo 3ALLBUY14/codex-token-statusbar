@@ -57,6 +57,48 @@ test('completed tool items count once per id, track failures and only sum record
   assert.equal(tools.byType.find(item => item.type === 'FileChange').total, 1);
 });
 
+test('tool records are deduplicated, copied and contain only bounded metadata', () => {
+  const result = accumulator();
+  result.processEvent(event({ type: 'task_started', turn_id: 'one' }));
+  const row = event({ type: 'item_completed', item: { id: 'failed-call', type: 'CommandExecution', status: 'completed', exit_code: 2, duration: { secs: 0, nanos: 0 }, command: 'secret argument', output: 'private output', failure: null } });
+  result.processEvent(row);
+  result.processEvent(row);
+  const snapshot = result.snapshot();
+  assert.equal(snapshot.toolUsage.total, 1);
+  assert.equal(snapshot.toolUsage.records.length, 1);
+  assert.equal(snapshot.turnToolUsage.records.length, 1);
+  const record = snapshot.toolUsage.records[0];
+  assert.equal(record.status, 'failed');
+  assert.equal(record.exitCode, 2);
+  assert.equal(record.durationMs, 0);
+  assert.equal(record.timestamp, row.timestamp);
+  assert.equal(JSON.stringify(record).includes('secret'), false);
+  assert.equal(JSON.stringify(record).includes('private'), false);
+  record.status = 'mutated';
+  assert.equal(result.snapshot().toolUsage.records[0].status, 'failed');
+  result.processEvent({ type: 'event_msg', timestamp: 'invalid', payload: { type: 'item_completed', item: { id: 'unknown-timing', type: 'FileChange', status: 'completed' } } });
+  assert.equal(result.snapshot().toolUsage.records[1].timestamp, null);
+  assert.equal(result.snapshot().toolUsage.records[1].durationMs, null);
+});
+
+test('recent records are capped without losing totals and reset for the next turn', () => {
+  const result = accumulator();
+  result.processEvent(event({ type: 'task_started', turn_id: 'one' }));
+  for (let i = 0; i < 205; i++) result.processEvent(event({ type: 'item_completed', item: { id: `tool-${i}`, type: 'CommandExecution', status: 'completed', duration: { secs: 1, nanos: 0 } } }));
+  const snapshot = result.snapshot();
+  assert.equal(snapshot.toolUsage.total, 205);
+  assert.equal(snapshot.toolUsage.durationMs, 205000);
+  assert.equal(snapshot.toolUsage.records.length, 200);
+  assert.equal(snapshot.toolUsage.records[0].sequence, 6);
+  assert.equal(snapshot.toolUsage.records.at(-1).sequence, 205);
+  assert.equal(snapshot.turnToolUsage.records.length, 200);
+  result.processEvent(event({ type: 'task_complete', turn_id: 'one' }));
+  assert.equal(result.snapshot().turnToolUsage.records.length, 200);
+  result.processEvent(event({ type: 'task_started', turn_id: 'two' }));
+  assert.equal(result.snapshot().turnToolUsage.records.length, 0);
+  assert.equal(result.snapshot().toolUsage.records.length, 200);
+});
+
 test('turn-level tool usage and model requests reset between turns while session totals persist', () => {
   const result = accumulator();
   result.processEvent(event({ type: 'task_started', turn_id: 'one' }));

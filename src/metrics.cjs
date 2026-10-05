@@ -3,17 +3,26 @@
 const { StringDecoder } = require('node:string_decoder');
 const TOKEN_FIELDS = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'reasoning_output_tokens'];
 const TOOL_LABELS = Object.freeze({ CommandExecution: '命令执行', FileChange: '文件修改', Extension: '扩展操作', ImageView: '图像查看' });
+const TOOL_RECORD_LIMIT = 200;
 const emptyUsage = () => ({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 });
-const emptyToolStats = () => ({ total: 0, failed: 0, durationMs: 0, timed: 0, byType: new Map() });
-const toolSnapshot = stats => ({ total: stats.total, failed: stats.failed, durationMs: stats.durationMs, timed: stats.timed, byType: [...stats.byType.values()].map(group => ({ ...group })) });
+const emptyToolStats = () => ({ total: 0, failed: 0, durationMs: 0, timed: 0, byType: new Map(), records: [] });
+const toolSnapshot = stats => ({ total: stats.total, failed: stats.failed, durationMs: stats.durationMs, timed: stats.timed, byType: [...stats.byType.values()].map(group => ({ ...group })), records: stats.records.map(record => ({ ...record })) });
 
-function addTool(stats, item, failed, durationMs) {
+function addTool(stats, item, failed, durationMs, timestamp) {
   const group = stats.byType.get(item.type) ?? { type: item.type, label: TOOL_LABELS[item.type], total: 0, failed: 0, durationMs: 0, timed: 0 };
   stats.total++;
   group.total++;
   if (failed) { stats.failed++; group.failed++; }
   if (durationMs !== null) { stats.durationMs += durationMs; stats.timed++; group.durationMs += durationMs; group.timed++; }
   stats.byType.set(item.type, group);
+  // Retain only bounded, structured metadata; never command arguments or output.
+  stats.records.push({
+    sequence: stats.total, type: item.type, label: TOOL_LABELS[item.type],
+    status: failed ? 'failed' : 'completed', durationMs,
+    timestamp: typeof timestamp === 'string' && timestamp.length <= 64 && Number.isFinite(Date.parse(timestamp)) ? timestamp : null,
+    exitCode: Number.isSafeInteger(item.exit_code) ? item.exit_code : null,
+  });
+  if (stats.records.length > TOOL_RECORD_LIMIT) stats.records.shift();
 }
 
 function usageOf(value) {
@@ -130,8 +139,8 @@ class SessionAccumulator {
       }
       const failed = item.status === 'failed' || Number.isSafeInteger(item.exit_code) && item.exit_code !== 0 || Boolean(item.failure);
       const durationMs = toolDurationMs(item.duration);
-      addTool(this.toolStats, item, failed, durationMs);
-      if (this.activeTurn) addTool(this.activeTurn.toolStats, item, failed, durationMs);
+      addTool(this.toolStats, item, failed, durationMs, row.timestamp);
+      if (this.activeTurn) addTool(this.activeTurn.toolStats, item, failed, durationMs, row.timestamp);
       return;
     }
     if (p.type === 'task_started') {

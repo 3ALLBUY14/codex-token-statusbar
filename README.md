@@ -1,4 +1,4 @@
-# Codex Token 状态条 V1（Windows）
+# Codex Token 状态条 V1.1（Windows）
 
 为 Codex 桌面版提供一个跟随窗口的独立浮条。基于
 [zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar)
@@ -15,7 +15,7 @@
 
 ## 开始使用
 
-从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1-Windows-x64.zip`。
+从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.1-Windows-x64.zip`。
 
 安装版：解压整个压缩包，双击 **`安装.cmd`**，选择是否开机启动和创建桌面入口，再点击“安装并启动”。安装到当前用户目录，无需管理员权限。可在 Windows“设置 → 应用”中卸载。
 
@@ -48,6 +48,15 @@
 | 工具调用 | 当前聊天日志中已完成的命令执行、文件修改、扩展操作和图像查看次数；失败数按结构化状态统计，有耗时记录的项目合计耗时 |
 
 点击 C 的明细还显示本轮或上一轮的模型请求数，以及该轮工具调用次数、失败数、可用耗时和按类别分组。会话工具累计与轮次工具统计分别展示。
+
+设置 → **工具调用明细** 可切换会话累计与本轮/上一轮，查看分类汇总及最近 200 条已完成调用的类别、完成时间、状态、退出码和已记录耗时，并筛选失败记录。即使隐藏浮条文字或关闭浮条的工具指标，设置里的明细仍可查看。完成记录不包含命令参数、文件内容或工具输出；缺失耗时显示“未记录”，历史汇总不受记录条数限制。
+
+<details>
+<summary>查看设置里的工具调用明细（模拟数据）</summary>
+
+![设置里的工具调用明细，使用模拟数据](docs/images/settings-tools.png)
+
+</details>
 
 上下文进度根据窗口容量提示：小于 100 万 Token 的窗口从 70% 显示黄色、85% 显示红色；100 万及以上窗口从 40% 显示黄色、60% 显示红色。明细会说明预警，只有日志明确报告上下文超限时才显示“超限”。这些阈值是提前提醒，不代表模型此时必然无法继续。
 

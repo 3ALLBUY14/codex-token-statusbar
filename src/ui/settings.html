@@ -22,6 +22,7 @@
         <label><input type="checkbox" data-setting="showCache">缓存命中率</label>
         <label><input type="checkbox" data-setting="showTools">工具调用</label>
       </div>
+      <a class="tool-details-link" href="#tool-details" id="open-tool-details">查看工具调用明细</a>
       <label class="drag-option"><input type="checkbox" data-setting="hideLabels">隐藏浮条文字</label>
       <p class="settings-note">隐藏指标名称和跟随状态，保留数值、进度条及 C、设置按钮；明细仍显示完整文字。</p>
     </section>
@@ -42,6 +43,29 @@
       <select class="full-select" id="chat" data-setting="pinnedThreadId"><option value="">自动跟随当前聊天</option></select>
       <div class="setting-row"><label for="contextOverride">手动窗口容量</label><input id="contextOverride" type="number" min="1000" max="10000000" step="1000" placeholder="自动" data-setting="contextOverride"></div>
       <p class="settings-note">容量留空则使用日志记录的值。100 万 Token 以下的窗口在 70% / 85% 预警，100 万及以上在 40% / 60% 预警。多个 Codex 窗口同时打开时，可锁定一个聊天，避免混用数据。</p>
+    </section>
+    <section class="settings-group" aria-labelledby="tool-details-heading">
+      <h2 id="tool-details-heading">工具调用明细</h2>
+      <p class="settings-note tool-chat" id="tool-chat">等待聊天数据</p>
+      <details id="tool-details">
+        <summary id="tool-details-summary">查看分类与调用记录</summary>
+        <div class="tool-controls">
+          <label for="tool-scope">统计范围</label>
+          <select id="tool-scope"><option value="session">会话累计</option><option value="turn" id="tool-turn-option">上一轮</option></select>
+        </div>
+        <p class="settings-note" id="tool-stats"></p>
+        <div class="tool-table-wrap">
+          <table class="tool-table" aria-label="工具调用分类统计">
+            <thead><tr><th scope="col">分类</th><th scope="col">次数</th><th scope="col">失败</th><th scope="col">计时</th><th scope="col">耗时</th></tr></thead>
+            <tbody id="settings-tool-groups"></tbody>
+          </table>
+        </div>
+        <p class="settings-note">计时表示有耗时记录的次数；耗时只合计日志提供的值。</p>
+        <div class="tool-record-heading"><h3>最近调用</h3><label><input type="checkbox" id="tool-failed-only">只看失败记录</label></div>
+        <p class="settings-note" id="tool-record-note"></p>
+        <ol class="tool-records" id="settings-tool-records" aria-label="最近已完成的工具调用"></ol>
+        <p class="settings-note" id="tool-empty"></p>
+      </details>
     </section>
     <section class="settings-group">
       <h2>速度怎么算</h2>
