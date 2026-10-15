@@ -8,6 +8,12 @@ async function checkSettingsUx({ win, overlay, settings, publish, artifactDirect
   const previous = { ...settings.value }, originalUpdate = settings.update;
   const ui = script => win.webContents.executeJavaScript(script);
   const view = script => overlay.webContents.executeJavaScript(script);
+  const capture = async filename => {
+    if (win.isMinimized()) win.restore();
+    win.showInactive(); await pause(200);
+    try { fs.writeFileSync(path.join(artifactDirectory, filename), (await win.webContents.capturePage(undefined, { stayAwake: true })).toPNG()); }
+    catch (error) { throw new Error('Settings screenshot failed: ' + filename + ' visible=' + win.isVisible() + ' minimized=' + win.isMinimized() + ' bounds=' + JSON.stringify(win.getBounds()) + ' cause=' + error.message); }
+  };
   try {
     if (win.isMaximized()) win.unmaximize(); win.setSize(560, 720); await pause(200);
     assert.equal(await ui('document.getElementById("advanced-position").open'), false);
@@ -34,12 +40,12 @@ async function checkSettingsUx({ win, overlay, settings, publish, artifactDirect
     assert.equal(fs.readFileSync(settings.filename, 'utf8'), before);
     publish(); await pause(100);
     result.failureSurvivedRefresh = await ui('document.getElementById("save-feedback").dataset.state === "error"');
-    fs.writeFileSync(path.join(artifactDirectory, 'settings-save-error.png'), (await win.webContents.capturePage()).toPNG());
+    await capture('settings-save-error.png');
     settings.update = originalUpdate;
     await ui('document.getElementById("retry-save").click()'); await pause(200);
     result.retrySaved = settings.value.showCache === expected && new SettingsStore(path.dirname(settings.filename)).value.showCache === expected;
     result.savedFeedback = await ui('document.getElementById("save-status").textContent === "已保存" && document.getElementById("retry-save").hidden');
-    fs.writeFileSync(path.join(artifactDirectory, 'settings-save-success.png'), (await win.webContents.capturePage()).toPNG());
+    await capture('settings-save-success.png');
     await pause(2600);
     result.successSettled = await ui('document.getElementById("save-feedback").dataset.state === "idle"');
     settings.update = function(patch) { if (Object.hasOwn(patch, 'displayPositions')) throw Object.assign(new Error('test-denied'), { code: 'EACCES' }); return originalUpdate.call(this, patch); };

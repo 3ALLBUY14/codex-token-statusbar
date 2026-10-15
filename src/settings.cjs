@@ -9,7 +9,7 @@ const DEFAULTS = Object.freeze({
   showSpeed: true, showContext: true, showSession: true, showTurn: false,
   showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null,
   offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false,
-  rememberDisplayPositions: true, displayPositions: [], desktopCompatibility: true, dockToComposer: false,
+  rememberDisplayPositions: true, displayPositions: [], desktopCompatibility: true, dockToComposer: false, composerAlignment: 'center',
 });
 
 function cleanSettings(input, previous = DEFAULTS) {
@@ -19,6 +19,7 @@ function cleanSettings(input, previous = DEFAULTS) {
     if (typeof input[key] === 'boolean') result[key] = input[key];
   }
   if (['system', 'dark', 'light'].includes(input.theme)) result.theme = input.theme;
+  if (['center', 'left', 'right'].includes(input.composerAlignment)) result.composerAlignment = input.composerAlignment;
   if (['top-right', 'bottom-right', 'bottom-center'].includes(input.placement)) result.placement = input.placement;
   if (Number.isFinite(input.scale)) result.scale = Math.max(0.75, Math.min(1.5, input.scale));
   if (Number.isFinite(input.opacity)) result.opacity = Math.round(Math.max(0.2, Math.min(1, input.opacity)) * 100) / 100;

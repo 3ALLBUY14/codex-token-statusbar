@@ -52,6 +52,7 @@ api.onSnapshot(state => {
     if (input.type === 'checkbox') input.checked = value; else input.value = input.id === 'opacity' ? Math.round((value ?? 1) * 100) : value ?? '';
   }
   opacityLabel();
+  $('composer-alignment').disabled = !state.settings.dockToComposer;
   for (const key of ['placement', 'allowDrag', 'offsetX', 'offsetY', 'alwaysVisible', 'rememberDisplayPositions']) document.querySelector(`[data-setting="${key}"]`).disabled = state.settings.dockToComposer;
   const docking = { below: '已贴靠输入框下方', above: '下方空间不足，已贴靠上方', waiting: '等待识别输入框，浮条暂时隐藏', 'host-hidden': 'Codex 不在前台，贴靠浮条已隐藏' };
   $('composer-note').textContent = state.settings.dockToComposer ? `${docking[state.runtime?.composerDock] ?? '正在识别输入框'}。独立浮层随输入框移动，暂停自由拖动和位置偏移；关闭后恢复原浮动位置。` : '独立浮层随输入框移动，优先放在下方；空间不足时放在上方。未识别到输入框或离开 Codex 时隐藏，不遮挡输入与发送按钮。此模式暂停自由拖动和位置偏移。';

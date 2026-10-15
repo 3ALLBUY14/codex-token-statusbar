@@ -46,6 +46,8 @@
     <section class="settings-group">
       <h2>位置与拖动</h2>
       <label><input type="checkbox" data-setting="dockToComposer">贴靠 Codex 输入框</label>
+      <div class="setting-row"><label for="composer-alignment">贴靠对齐</label><select id="composer-alignment" data-setting="composerAlignment" aria-describedby="composer-alignment-note"><option value="center">自适应居中</option><option value="left">靠左</option><option value="right">靠右</option></select></div>
+      <p class="settings-note" id="composer-alignment-note">以输入框区域对齐，随宽度变化自动调整；展开明细时保持浮条对齐。仅在开启输入框贴靠后生效。</p>
       <p class="settings-note" id="composer-note">独立浮层随输入框移动，优先放在下方；空间不足时放在上方。未识别到输入框或离开 Codex 时隐藏，不遮挡输入与发送按钮。此模式暂停自由拖动和位置偏移。</p>
       <div class="setting-row"><label for="placement">跟随窗口的位置</label><select id="placement" data-setting="placement"><option value="top-right">右上方</option><option value="bottom-right">右下方</option><option value="bottom-center">底部居中</option></select></div>
       <label class="drag-option"><input type="checkbox" data-setting="allowDrag">允许自由拖动浮条</label>

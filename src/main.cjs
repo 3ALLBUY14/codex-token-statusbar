@@ -211,7 +211,7 @@ function positionOverlay() {
   let width = Math.min(overlaySize.width, availableWidth);
   const compact = availableWidth / value.scale < 470;
   const barHeight = overlaySize.barHeight ?? Math.ceil(52 * value.scale);
-  const dock = composer && composerPosition(dockHost, composer, { width, height: Math.min(overlaySize.height, work.height) }, barHeight);
+  const dock = composer && composerPosition(dockHost, composer, { width, height: Math.min(overlaySize.height, work.height) }, barHeight, value.composerAlignment);
   const availableHeight = dock ? dock.y + dock.height - dockHost.y : work.height;
   if (compactLayout?.compact !== compact || compactLayout?.availableWidth !== availableWidth || compactLayout?.availableHeight !== availableHeight) {
     compactLayout = { compact, availableWidth, availableHeight };
@@ -421,7 +421,7 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 21 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 22 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
   const settingsUx = await require('./settings-ux-smoke.cjs').checkSettingsUx({ win: settingsWindow, overlay, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
@@ -595,11 +595,39 @@ async function smokeDocking() {
     lastHost = { x: work.x, y: work.y, width: Math.min(950, work.width), height: Math.min(740, work.height) };
     hostVisible = true; hostHandle = 123; manuallyHidden = false;
     composerSample = { handle: 123, at: Date.now(), host: { ...lastHost }, rect: { x: lastHost.x + 30, y: lastHost.y + lastHost.height - 120, width: lastHost.width - 60, height: 105 } };
-    settings.update({ dockToComposer: true, scale: 1, alwaysVisible: true }); publish(); positionOverlay(); await wait(500);
+    settings.update({ dockToComposer: true, scale: 1, alwaysVisible: true, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: true }); publish(); positionOverlay(); await wait(500);
     const initial = overlay.getBounds();
     if (!overlay.isVisible() || dockStatus !== 'above' || initial.y + initial.height > composerSample.rect.y) throw new Error('Composer docking overlapped input');
     const controls = await settingsWindow.webContents.executeJavaScript("document.querySelector('[data-setting=dockToComposer]').checked && ['placement','allowDrag','offsetX','offsetY','alwaysVisible'].every(k => document.querySelector('[data-setting='+k+']').disabled)");
     if (!controls) throw new Error('Composer controls did not reflect docking mode');
+    const alignments = {};
+    for (const alignment of ['left', 'center', 'right']) {
+      composerSample.at = Date.now();
+      await settingsWindow.webContents.executeJavaScript(`(() => { const input = document.getElementById('composer-alignment'); input.value = '${alignment}'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      for (let attempt = 0; settings.value.composerAlignment !== alignment && attempt < 30; attempt++) await wait(50);
+      if (settings.value.composerAlignment !== alignment || new SettingsStore(path.dirname(settings.filename)).value.composerAlignment !== alignment) throw new Error('Composer alignment did not persist');
+      const samples = [];
+      for (const open of [false, true]) {
+        await overlay.webContents.executeJavaScript(`(() => { const button = document.querySelector('[data-action=details]'); if (button.getAttribute('aria-expanded') !== '${open}') button.click(); })()`);
+        let match = false;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await wait(50);
+          const bar = await overlay.webContents.executeJavaScript("(() => { const r=document.getElementById('bar').getBoundingClientRect(); return {x:r.x,width:r.width}; })()");
+          const win = overlay.getBounds(), input = composerSample.rect;
+          const actual = win.x + bar.x + (alignment === 'center' ? bar.width / 2 : alignment === 'right' ? bar.width : 0);
+          const expected = input.x + (alignment === 'center' ? input.width / 2 : alignment === 'right' ? input.width - 8 : 8);
+          if (Math.abs(actual - expected) <= 2) { match = true; samples.push({ open, error: Math.round((actual - expected) * 100) / 100 }); break; }
+        }
+        if (!match) throw new Error('Visible composer bar failed ' + alignment + ' alignment, open=' + open);
+      }
+      alignments[alignment] = samples;
+    }
+    const loaded = new Promise(resolve => settingsWindow.webContents.once('did-finish-load', resolve));
+    settingsWindow.webContents.reload(); await loaded; await wait(250);
+    const restoredAlignment = await settingsWindow.webContents.executeJavaScript("document.getElementById('composer-alignment').value === 'right' && !document.getElementById('composer-alignment').disabled");
+    if (!restoredAlignment) throw new Error('Composer alignment did not restore after reloading settings');
+    await settingsWindow.webContents.executeJavaScript("document.getElementById('tab-display').click(); document.getElementById('composer-alignment').scrollIntoView({block:'center'});");
+    fs.writeFileSync(path.join(artifactDirectory, 'composer-alignment-settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     composerSample.at = Date.now() - 4000; positionOverlay();
     if (overlay.isVisible()) throw new Error('Stale composer kept an overlay visible');
     composerSample.at = Date.now(); positionOverlay();
@@ -608,7 +636,7 @@ async function smokeDocking() {
     if (overlay.isVisible()) throw new Error('Docked bar leaked over another application');
     hostVisible = true; composerSample = null; positionOverlay();
     if (overlay.isVisible()) throw new Error('Missing composer reused previous position');
-    return { avoidsInput: true, controls: true, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
+    return { avoidsInput: true, controls: true, alignments, restoredAlignment, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
   } finally {
     settings.update(saved.value); ({ lastHost, hostVisible, hostHandle, composerSample, overlaySize, manuallyHidden } = saved);
     publish(); positionOverlay();

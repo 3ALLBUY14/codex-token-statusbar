@@ -84,7 +84,8 @@ function fitMetrics() {
   }
   list.hidden = list.children.length === 0;
   $('shell').style.width = detailsOpen ? `${Math.min(limit + 16, Math.max(520, $('bar').offsetWidth + 16))}px` : '';
-  $('shell').style.alignItems = detailsOpen ? 'flex-end' : '';
+  const alignment = snapshot?.settings.dockToComposer ? snapshot.settings.composerAlignment : 'right';
+  $('shell').style.alignItems = detailsOpen ? { left: 'flex-start', center: 'center', right: 'flex-end' }[alignment] ?? 'center' : '';
 }
 
 function measure() {
