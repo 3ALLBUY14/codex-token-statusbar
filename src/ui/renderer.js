@@ -7,6 +7,7 @@ let dragPointer = null;
 let dragError = '';
 let availableWidth = null;
 let availableHeight = null;
+let titlebarHeight = null;
 let lastResize = '';
 let opacityPreview = null;
 let detailContext = null;
@@ -47,7 +48,10 @@ const time = value => Number.isFinite(value) ? `${(value / 1000).toFixed(1)}s` :
 const modes = { following: '跟随当前聊天', recent: '最近活跃聊天', pinned: '已锁定聊天', ambiguous: '识别有歧义，请选择聊天', empty: '当前页面暂无本地聊天数据', unbound: '等待聊天数据' };
 
 function fitMetrics() {
-  const zoom = snapshot?.settings.scale ?? 1;
+  const titlebar = snapshot?.settings.dockToComposer && snapshot.settings.dockTarget === 'titlebar';
+  $('shell').classList.toggle('titlebar', Boolean(titlebar));
+  const zoom = titlebar ? Math.min(snapshot.settings.scale, Math.max(0.6, ((titlebarHeight ?? 32) - 4) / ($('bar').offsetHeight + 4))) : snapshot?.settings.scale ?? 1;
+  document.body.style.zoom = zoom;
   const limit = Math.max(120, Math.floor((availableWidth ?? window.innerWidth) / zoom) - 16);
   $('shell').style.maxWidth = `${limit + 16}px`;
   $('bar').style.maxWidth = `${limit}px`;
@@ -91,11 +95,11 @@ function fitMetrics() {
 function measure() {
   requestAnimationFrame(() => {
     fitMetrics();
-    const zoom = snapshot?.settings.scale ?? 1;
+    const zoom = Number(document.body.style.zoom) || 1;
     const width = Math.ceil((Math.max($('bar').offsetWidth, detailsOpen ? $('details').offsetWidth : 0) + 16) * zoom);
     const height = Math.ceil($('shell').getBoundingClientRect().height);
     const size = `${width}x${height}`;
-    if (size !== lastResize) { lastResize = size; api.resize(width, height, Math.ceil(($('bar').offsetHeight + 16) * zoom)); }
+    if (size !== lastResize) { lastResize = size; api.resize(width, height, Math.ceil(($('bar').offsetHeight + ($('shell').classList.contains('titlebar') ? 4 : 16)) * zoom)); }
   });
 }
 function detailVisibility(open) {
@@ -225,7 +229,7 @@ $('bar').addEventListener('lostpointercapture', event => finishDrag(event, 'canc
 new ResizeObserver(measure).observe($('shell'));
 api.onSnapshot(render);
 api.onOpacityPreview(value => { opacityPreview = value; applyOpacity(); });
-api.onCompact(layout => { availableWidth = layout.availableWidth; availableHeight = layout.availableHeight; $('shell').classList.toggle('compact', layout.compact); measure(); });
+api.onCompact(layout => { availableWidth = layout.availableWidth; availableHeight = layout.availableHeight; titlebarHeight = layout.titlebarHeight; $('shell').classList.toggle('compact', layout.compact); measure(); });
 api.onCollapse(() => $('bar').classList.remove('pointer-near'));
 api.onDragError(message => { dragError = message; if (snapshot) render(snapshot); });
 api.ready();

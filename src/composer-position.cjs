@@ -11,4 +11,11 @@ function composerPosition(host, composer, size, barHeight, alignment = 'center')
   const offset = alignment === 'left' ? 0 : alignment === 'right' ? composer.width - width : (composer.width - width) / 2;
   return { x: Math.round(composer.x + offset), y: Math.round(bottom - height), width: Math.ceil(width), height: Math.floor(height), edge };
 }
-module.exports = { validRect, composerPosition };
+function titlebarPosition(host, area, size, barHeight, alignment = 'center') {
+  if (!validRect(host) || !validRect(area) || area.x < host.x || area.y < host.y || area.x + area.width > host.x + host.width + 2 || area.y + area.height > host.y + host.height || barHeight > area.height - 2) return null;
+  const width = Math.min(size.width, area.width);
+  const offset = alignment === 'left' ? 0 : alignment === 'right' ? area.width - width : (area.width - width) / 2;
+  const y = Math.round(area.y + (area.height - barHeight) / 2);
+  return { x: Math.round(area.x + offset), y, width: Math.ceil(width), height: Math.floor(Math.min(size.height, host.y + host.height - y)), edge: 'titlebar' };
+}
+module.exports = { validRect, composerPosition, titlebarPosition };

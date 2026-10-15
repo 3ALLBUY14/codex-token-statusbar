@@ -14,7 +14,7 @@ class WindowWatcher extends EventEmitter {
     this.backend = exists(executable) ? 'independent' : 'powershell';
     this.geometry = null; this.title = null; this.geometryAt = 0; this.titleAt = 0;
     this.error = null; this.titleError = null; this.geometryFailures = 0;
-    this.target = null; this.stopped = false; this.geometryTimer = null; this.titleTimer = null; this.trackComposer = false;
+    this.target = null; this.stopped = false; this.geometryTimer = null; this.titleTimer = null; this.trackComposer = false; this.dockTarget = 'composer';
   }
   status() {
     return { backend: this.backend, geometryRunning: Boolean(this.geometry && !this.geometry.killed), geometryHealthy: Boolean(this.geometryAt && this.now() - this.geometryAt < this.timeoutMs), titleHealthy: this.backend === 'powershell' ? Boolean(this.geometryAt && this.now() - this.geometryAt < this.timeoutMs) : Boolean(this.titleAt && this.now() - this.titleAt < this.timeoutMs), error: this.error, titleError: this.titleError };
@@ -61,9 +61,9 @@ class WindowWatcher extends EventEmitter {
   }
   sendTarget() {
     if (!this.target || !this.title?.stdin?.writable || this.title.stdin.destroyed || this.title.stdin.writableNeedDrain) return;
-    this.title.stdin.write(JSON.stringify({ ...this.target, composer: this.trackComposer }) + '\n');
+    this.title.stdin.write(JSON.stringify({ ...this.target, composer: this.trackComposer, dockTarget: this.dockTarget }) + '\n');
   }
-  setComposerTracking(enabled) { const next = enabled === true; if (next !== this.trackComposer) { this.trackComposer = next; this.sendTarget(); } }
+  setComposerTracking(enabled, target = 'composer') { const next = enabled === true; if (next !== this.trackComposer || target !== this.dockTarget) { this.trackComposer = next; this.dockTarget = target; this.sendTarget(); } }
   startTitle() {
     this.titleTimer = null;
     if (this.stopped || this.backend !== 'independent') return;
@@ -76,7 +76,7 @@ class WindowWatcher extends EventEmitter {
       this.titleAt = this.now(); this.titleError = sample.unavailable ? '标题暂不可读，页面 ID 识别仍可用' : null;
       if (!sample.idle && this.target?.handle === sample.handle && this.target?.processId === sample.processId) {
         this.emit('title', sample);
-        if (this.trackComposer) this.emit('composer', { handle: sample.handle, processId: sample.processId, rect: validRect(sample.composer) ? sample.composer : null });
+        if (this.trackComposer && (sample.dockTarget ?? 'composer') === this.dockTarget) this.emit('composer', { handle: sample.handle, processId: sample.processId, target: this.dockTarget, rect: validRect(sample.composer) ? sample.composer : null });
       }
       this.emit('status');
     });

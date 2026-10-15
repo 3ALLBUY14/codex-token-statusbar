@@ -13,7 +13,7 @@ const { contextStatus } = require('./metrics.cjs');
 const { anchorPosition, displayPosition, positionPatch, clampBounds } = require('./display-position.cjs');
 const { diagnosticSummary, newerVersion, versionParts, RELEASE_URL, UPDATE_URL } = require('./diagnostics.cjs');
 const { OverlayLayer } = require('./overlay-layer.cjs');
-const { composerPosition } = require('./composer-position.cjs');
+const { composerPosition, titlebarPosition } = require('./composer-position.cjs');
 const overlayLayer = new OverlayLayer();
 
 app.setName('Codex Token Statusbar');
@@ -151,7 +151,7 @@ function queuePublish() {
 function currentDisplay() { return lastHost ? screen.getDisplayMatching(lastHost) : screen.getPrimaryDisplay(); }
 function currentPositionSettings() {
   const position = displayPosition(settings.value, currentDisplay(), screen.getAllDisplays());
-  return { placement: settings.value.dockToComposer ? 'bottom-center' : position.placement, offsetX: position.offsetX, offsetY: position.offsetY };
+  return { placement: settings.value.dockToComposer ? settings.value.dockTarget === 'titlebar' ? 'top-right' : 'bottom-center' : position.placement, offsetX: position.offsetX, offsetY: position.offsetY };
 }
 function updatePositionSettings(patch) {
   if (!patch || typeof patch !== 'object') return settings.value;
@@ -198,23 +198,26 @@ function positionOverlay() {
   updateActivity();
   if (!overlay || overlay.isDestroyed() || !overlayLoaded) return;
   const value = settings.value;
-  nativeWatcher?.setComposerTracking(value.dockToComposer);
+  nativeWatcher?.setComposerTracking(value.dockToComposer, value.dockTarget);
+  const titlebar = value.dockToComposer && value.dockTarget === 'titlebar';
   const host = currentDisplay(), position = displayPosition(value, host, screen.getAllDisplays());
   const display = position.display;
   const bounds = display.id === host.id ? lastHost || host.workArea : display.workArea;
-  let work = display.workArea;
-  const composer = value.dockToComposer && hostVisible && composerSample && Date.now() - composerSample.at < 3500 && composerSample.handle === hostHandle && lastHost && composerSample.host.width === lastHost.width && composerSample.host.height === lastHost.height ? {
+  let work = titlebar ? host.bounds : display.workArea;
+  const composer = value.dockToComposer && hostVisible && composerSample && (composerSample.target ?? 'composer') === value.dockTarget && Date.now() - composerSample.at < 3500 && composerSample.handle === hostHandle && lastHost && composerSample.host.width === lastHost.width && composerSample.host.height === lastHost.height ? {
     ...composerSample.rect, x: composerSample.rect.x + lastHost.x - composerSample.host.x, y: composerSample.rect.y + lastHost.y - composerSample.host.y,
   } : null;
-  const dockHost = lastHost && { x: Math.max(lastHost.x, host.workArea.x), y: Math.max(lastHost.y, host.workArea.y), width: Math.min(lastHost.x + lastHost.width, host.workArea.x + host.workArea.width) - Math.max(lastHost.x, host.workArea.x), height: Math.min(lastHost.y + lastHost.height, host.workArea.y + host.workArea.height) - Math.max(lastHost.y, host.workArea.y) };
+  const hostWork = titlebar ? host.bounds : host.workArea;
+  const dockHost = lastHost && { x: Math.max(lastHost.x, hostWork.x), y: Math.max(lastHost.y, hostWork.y), width: Math.min(lastHost.x + lastHost.width, hostWork.x + hostWork.width) - Math.max(lastHost.x, hostWork.x), height: Math.min(lastHost.y + lastHost.height, hostWork.y + hostWork.height) - Math.max(lastHost.y, hostWork.y) };
   const availableWidth = Math.min(Math.max(200, composer?.width ?? bounds.width - 24), work.width);
   let width = Math.min(overlaySize.width, availableWidth);
   const compact = availableWidth / value.scale < 470;
   const barHeight = overlaySize.barHeight ?? Math.ceil(52 * value.scale);
-  const dock = composer && composerPosition(dockHost, composer, { width, height: Math.min(overlaySize.height, work.height) }, barHeight, value.composerAlignment);
-  const availableHeight = dock ? dock.y + dock.height - dockHost.y : work.height;
-  if (compactLayout?.compact !== compact || compactLayout?.availableWidth !== availableWidth || compactLayout?.availableHeight !== availableHeight) {
-    compactLayout = { compact, availableWidth, availableHeight };
+  const dock = composer && (titlebar ? titlebarPosition : composerPosition)(dockHost, composer, { width, height: Math.min(overlaySize.height, work.height) }, barHeight, value.composerAlignment);
+  const availableHeight = dock ? titlebar ? dockHost.y + dockHost.height - dock.y : dock.y + dock.height - dockHost.y : work.height;
+  const titlebarHeight = titlebar ? composer?.height ?? 32 : null;
+  if (compactLayout?.compact !== compact || compactLayout?.availableWidth !== availableWidth || compactLayout?.availableHeight !== availableHeight || compactLayout?.titlebarHeight !== titlebarHeight) {
+    compactLayout = { compact, availableWidth, availableHeight, titlebarHeight };
     overlay.webContents.send('statusbar:compact', compactLayout);
   }
   let height = Math.min(overlaySize.height, work.height);
@@ -223,7 +226,7 @@ function positionOverlay() {
   let y = anchor.y + position.offsetY;
   const previousDockStatus = dockStatus;
   dockStatus = !value.dockToComposer ? 'off' : !hostVisible ? 'host-hidden' : dock ? dock.edge : 'waiting';
-  if (dock) { ({ x, y, width, height } = dock); work = host.workArea; }
+  if (dock) { ({ x, y, width, height } = dock); work = hostWork; }
   else if (dragSession?.moved && !value.dockToComposer) {
     const cursor = screen.getCursorScreenPoint();
     work = screen.getDisplayNearestPoint(cursor).workArea;
@@ -289,7 +292,7 @@ function watchWindows() {
   });
   watcher.on('composer', sample => {
     if (!hostVisible || sample.handle !== hostHandle) return;
-    composerSample = sample.rect && lastHost ? { handle: sample.handle, rect: screen.screenToDipRect(null, sample.rect), host: { ...lastHost }, at: Date.now() } : null;
+    composerSample = sample.rect && lastHost ? { handle: sample.handle, target: sample.target, rect: screen.screenToDipRect(null, sample.rect), host: { ...lastHost }, at: Date.now() } : null;
     positionOverlay();
   });
   watcher.on('title', sample => { visibleChat?.observe(sample.documentTitle, sample.processId, sample.handle); queuePublish(); });
@@ -421,7 +424,7 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 22 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 23 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
   const settingsUx = await require('./settings-ux-smoke.cjs').checkSettingsUx({ win: settingsWindow, overlay, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
@@ -595,7 +598,7 @@ async function smokeDocking() {
     lastHost = { x: work.x, y: work.y, width: Math.min(950, work.width), height: Math.min(740, work.height) };
     hostVisible = true; hostHandle = 123; manuallyHidden = false;
     composerSample = { handle: 123, at: Date.now(), host: { ...lastHost }, rect: { x: lastHost.x + 30, y: lastHost.y + lastHost.height - 120, width: lastHost.width - 60, height: 105 } };
-    settings.update({ dockToComposer: true, scale: 1, alwaysVisible: true, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: true }); publish(); positionOverlay(); await wait(500);
+    settings.update({ dockToComposer: true, dockTarget: 'composer', scale: 1, alwaysVisible: true, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: true }); publish(); positionOverlay(); await wait(500);
     const initial = overlay.getBounds();
     if (!overlay.isVisible() || dockStatus !== 'above' || initial.y + initial.height > composerSample.rect.y) throw new Error('Composer docking overlapped input');
     const controls = await settingsWindow.webContents.executeJavaScript("document.querySelector('[data-setting=dockToComposer]').checked && ['placement','allowDrag','offsetX','offsetY','alwaysVisible'].every(k => document.querySelector('[data-setting='+k+']').disabled)");
@@ -626,6 +629,29 @@ async function smokeDocking() {
     settingsWindow.webContents.reload(); await loaded; await wait(250);
     const restoredAlignment = await settingsWindow.webContents.executeJavaScript("document.getElementById('composer-alignment').value === 'right' && !document.getElementById('composer-alignment').disabled");
     if (!restoredAlignment) throw new Error('Composer alignment did not restore after reloading settings');
+    const titlebarChecks = [];
+    settings.update({ scale: 1.5 });
+    await settingsWindow.webContents.executeJavaScript("(() => { const input=document.getElementById('dock-target'); input.value='titlebar'; input.dispatchEvent(new Event('change',{bubbles:true})); })()");
+    for (let attempt = 0; settings.value.dockTarget !== 'titlebar' && attempt < 30; attempt++) await wait(50);
+    if (settings.value.dockTarget !== 'titlebar' || new SettingsStore(path.dirname(settings.filename)).value.dockTarget !== 'titlebar') throw new Error('Titlebar target did not persist');
+    composerSample = { handle: 123, target: 'titlebar', at: Date.now(), host: { ...lastHost }, rect: { x: lastHost.x + 260, y: lastHost.y + 4, width: lastHost.width - 420, height: 36 } };
+    publish(); positionOverlay();
+    for (const alignment of ['left', 'center', 'right']) {
+      settings.update({ composerAlignment: alignment }); composerSample.at = Date.now(); publish(); positionOverlay();
+      for (const open of [false, true]) {
+        await overlay.webContents.executeJavaScript(`(() => { const button = document.querySelector('[data-action=details]'); if (button.getAttribute('aria-expanded') !== '${open}') button.click(); })()`);
+        let passed = false;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await wait(50);
+          const layout = await overlay.webContents.executeJavaScript("(() => { const b=document.getElementById('bar').getBoundingClientRect(), d=document.getElementById('details').getBoundingClientRect(); return {x:b.x,y:b.y,width:b.width,height:b.height,zoom:Number(document.body.style.zoom),detailsBelow:d.top>=b.bottom,bottom:document.getElementById('shell').classList.contains('bottom')}; })()");
+          const win = overlay.getBounds(), area = composerSample.rect;
+          const actual = win.x + layout.x + (alignment === 'center' ? layout.width / 2 : alignment === 'right' ? layout.width : 0);
+          const expected = area.x + (alignment === 'center' ? area.width / 2 : alignment === 'right' ? area.width - 8 * layout.zoom : 8 * layout.zoom);
+          if (overlay.isVisible() && dockStatus === 'titlebar' && Math.abs(actual - expected) <= 2 && win.y + layout.y >= area.y && win.y + layout.y + layout.height <= area.y + area.height && !layout.bottom && (!open || layout.detailsBelow)) { titlebarChecks.push({ alignment, open, height: layout.height, zoom: layout.zoom }); passed = true; break; }
+        }
+        if (!passed) throw new Error('Titlebar fit/alignment/downward details failed: ' + alignment + ' open=' + open);
+      }
+    }
     await settingsWindow.webContents.executeJavaScript("document.getElementById('tab-display').click(); document.getElementById('composer-alignment').scrollIntoView({block:'center'});");
     fs.writeFileSync(path.join(artifactDirectory, 'composer-alignment-settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     composerSample.at = Date.now() - 4000; positionOverlay();
@@ -636,7 +662,7 @@ async function smokeDocking() {
     if (overlay.isVisible()) throw new Error('Docked bar leaked over another application');
     hostVisible = true; composerSample = null; positionOverlay();
     if (overlay.isVisible()) throw new Error('Missing composer reused previous position');
-    return { avoidsInput: true, controls: true, alignments, restoredAlignment, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
+    return { avoidsInput: true, controls: true, alignments, restoredAlignment, titlebarChecks, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
   } finally {
     settings.update(saved.value); ({ lastHost, hostVisible, hostHandle, composerSample, overlaySize, manuallyHidden } = saved);
     publish(); positionOverlay();
@@ -666,7 +692,7 @@ else {
     ipcMain.on('statusbar:ready', event => { if (validSender(event)) { if (demo) event.sender.send('statusbar:snapshot', demoState()); else publish(); } });
     ipcMain.on('statusbar:resize', (event, size) => {
       if (event.sender !== overlay.webContents || !Number.isFinite(size?.width) || !Number.isFinite(size?.height)) return;
-      overlaySize = { width: Math.max(260, Math.min(1400, Math.ceil(size.width))), height: Math.max(48, Math.min(1600, Math.ceil(size.height))), barHeight: Number.isFinite(size.barHeight) ? Math.max(20, Math.min(160, Math.ceil(size.barHeight))) : overlaySize.barHeight };
+      overlaySize = { width: Math.max(260, Math.min(1400, Math.ceil(size.width))), height: Math.max(20, Math.min(1600, Math.ceil(size.height))), barHeight: Number.isFinite(size.barHeight) ? Math.max(20, Math.min(160, Math.ceil(size.barHeight))) : overlaySize.barHeight };
       positionOverlay();
     });
     ipcMain.on('statusbar:drag', (event, action, point) => { if (event.sender === overlay.webContents && ['start', 'move', 'end', 'cancel'].includes(action)) dragOverlay(action, point); });

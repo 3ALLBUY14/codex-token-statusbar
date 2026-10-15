@@ -12,6 +12,7 @@ internal static class WindowHelper {
     private static long targetHandle;
     private static int targetPid;
     private static bool trackComposer;
+    private static string dockTarget = "composer";
     private static int ownerPid;
     private static StreamWriter output;
     private static bool ParentAlive() { return ownerPid == 0 || CodexStatusbarWindows.IsProcessRunning(ownerPid); }
@@ -59,7 +60,8 @@ internal static class WindowHelper {
                         var input = parser.Deserialize<Dictionary<string, object>>(line);
                         long handle = Convert.ToInt64(input["handle"]); int pid = Convert.ToInt32(input["processId"]);
                         bool composer = input.ContainsKey("composer") && input["composer"] is bool && (bool)input["composer"];
-                        lock (TargetLock) { targetHandle = Math.Max(0, handle); targetPid = Math.Max(0, pid); trackComposer = composer; }
+                        string dock = input.ContainsKey("dockTarget") && Convert.ToString(input["dockTarget"]) == "titlebar" ? "titlebar" : "composer";
+                        lock (TargetLock) { targetHandle = Math.Max(0, handle); targetPid = Math.Max(0, pid); trackComposer = composer; dockTarget = dock; }
                     } catch { }
                 }
             } catch { }
@@ -69,8 +71,8 @@ internal static class WindowHelper {
         var serializer = new JavaScriptSerializer();
         string previous = null; DateTime lastOutput = DateTime.MinValue;
         while (ParentAlive()) {
-            long handle; int pid; bool composerEnabled;
-            lock (TargetLock) { handle = targetHandle; pid = targetPid; composerEnabled = trackComposer; }
+            long handle; int pid; bool composerEnabled; string dock;
+            lock (TargetLock) { handle = targetHandle; pid = targetPid; composerEnabled = trackComposer; dock = dockTarget; }
             string title = null; bool unavailable = false;
             object composer = null;
             if (handle != 0 && pid != 0) {
@@ -82,15 +84,41 @@ internal static class WindowHelper {
                     var document = element.FindFirst(TreeScope.Descendants, condition);
                     if (document != null) title = document.Current.Name;
                     if (title != null && title.Length > 2048) title = null;
-                    if (composerEnabled) { try { composer = ReadComposer(element); } catch { composer = null; } }
+                    if (composerEnabled) { try { composer = dock == "titlebar" ? ReadTitlebar(element, new IntPtr(handle)) : ReadComposer(element); } catch { composer = null; } }
                 } catch { unavailable = true; }
             }
-            lock (TargetLock) { if (handle != targetHandle || pid != targetPid || composerEnabled != trackComposer) continue; }
-            string sample = serializer.Serialize(new { handle = handle, processId = pid, documentTitle = title, idle = handle == 0, unavailable = unavailable, composer = composer });
+            lock (TargetLock) { if (handle != targetHandle || pid != targetPid || composerEnabled != trackComposer || dock != dockTarget) continue; }
+            string sample = serializer.Serialize(new { handle = handle, processId = pid, documentTitle = title, idle = handle == 0, unavailable = unavailable, composer = composer, dockTarget = dock });
             DateTime now = DateTime.UtcNow;
             if (sample != previous || (now - lastOutput).TotalSeconds >= 2) { Write(sample); previous = sample; lastOutput = now; }
             Thread.Sleep(handle == 0 ? 1000 : 750);
         }
+    }
+    // Use actual menu/caption control bounds; never infer a slot over window buttons.
+    private static object ReadTitlebar(AutomationElement root, IntPtr hwnd) {
+        if (CodexStatusbarWindows.IsIconic(hwnd)) return null;
+        var host = root.Current.BoundingRectangle;
+        if (host.IsEmpty || host.Width < 350 || host.Height < 250) return null;
+        var menus = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuBar));
+        double left = host.Left, top = 0, bottom = 0; bool menuFound = false;
+        for (int i = 0; i < Math.Min(menus.Count, 16); i++) {
+            var info = menus[i].Current; var r = info.BoundingRectangle;
+            if (info.IsOffscreen || r.IsEmpty || r.Top < host.Top || r.Top > host.Top + 100 || r.Height > 100 || r.Width > host.Width / 2) continue;
+            left = Math.Max(left, r.Right); top = r.Top; bottom = r.Bottom; menuFound = true; break;
+        }
+        if (!menuFound) return null;
+        double right = host.Right; int captions = 0;
+        var buttons = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ClassNameProperty, "ChromeNodeCaptionButton"));
+        for (int i = 0; i < Math.Min(buttons.Count, 12); i++) {
+            var info = buttons[i].Current; var r = info.BoundingRectangle;
+            if (info.IsOffscreen || r.IsEmpty || r.Top < host.Top || r.Top > bottom || r.Bottom > host.Top + 120 || r.Left < left) continue;
+            right = Math.Min(right, r.Left); top = Math.Min(top, r.Top); bottom = Math.Max(bottom, r.Bottom); captions++;
+        }
+        if (captions < 2) return null;
+        double padding = Math.Max(6, (bottom - top) / 6);
+        left += padding; right -= padding;
+        if (right - left < 200 || bottom - top < 20 || bottom - top > 120) return null;
+        return new { x = Math.Ceiling(left), y = Math.Ceiling(top), width = Math.Floor(right) - Math.Ceiling(left), height = Math.Floor(bottom) - Math.Ceiling(top) };
     }
     // Only control classes and bounds are inspected. Never read input Value/Name.
     private static object ReadComposer(AutomationElement root) {

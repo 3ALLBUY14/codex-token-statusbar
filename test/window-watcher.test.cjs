@@ -61,3 +61,13 @@ test('composer tracking only accepts the current HWND and valid rectangles while
   write(children[1], { ...sample, composer: { ...sample.composer, width: Infinity } }); assert.equal(received.at(-1).rect, null);
   write(children[0], { ...geometry, handle: 22 }); write(children[1], sample); assert.equal(received.length, 2);
 });
+
+test('changing dock target rejects late bounds from the previous region', t => {
+  const { watcher, children } = harness(t), received = [];
+  watcher.on('composer', value => received.push(value)); watcher.start(); write(children[0], geometry);
+  watcher.setComposerTracking(true, 'titlebar');
+  const sample = { handle: 20, processId: 10, idle: false, documentTitle: null, composer: { x: 100, y: 2, width: 500, height: 36 } };
+  write(children[1], { ...sample, dockTarget: 'composer' }); assert.equal(received.length, 0);
+  write(children[1], { ...sample, dockTarget: 'titlebar' }); assert.equal(received.at(-1).target, 'titlebar');
+  watcher.setComposerTracking(true, 'composer'); write(children[1], { ...sample, dockTarget: 'titlebar' }); assert.equal(received.length, 1);
+});

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { composerPosition } = require('../src/composer-position.cjs');
+const { composerPosition, titlebarPosition } = require('../src/composer-position.cjs');
 const { OverlayLayer } = require('../src/overlay-layer.cjs');
 const { cleanSettings, DEFAULTS } = require('../src/settings.cjs');
 const host = { x: -1000, y: 20, width: 1000, height: 800 };
@@ -42,6 +42,26 @@ test('composer alignment defaults safely and rejects invalid settings', () => {
   for (const alignment of ['center', 'left', 'right']) assert.equal(cleanSettings({ composerAlignment: alignment }).composerAlignment, alignment);
   assert.equal(cleanSettings({ composerAlignment: 'invalid' }).composerAlignment, 'center');
   assert.equal(cleanSettings({ composerAlignment: null }, { ...DEFAULTS, composerAlignment: 'right' }).composerAlignment, 'right');
+});
+
+test('titlebar docking stays inside the safe slot and expands down without moving the bar', () => {
+  for (const scale of [1, 1.25, 1.5, 2]) for (const alignment of ['left', 'center', 'right']) {
+    const frame = { x: -2000 / scale, y: -100, width: 1800 / scale, height: 1200 / scale };
+    const area = { x: frame.x + 400 / scale, y: frame.y + 4, width: 1100 / scale, height: 48 / scale };
+    const bar = 28 / scale;
+    const closed = titlebarPosition(frame, area, { width: 400 / scale, height: bar }, bar, alignment);
+    const open = titlebarPosition(frame, area, { width: 700 / scale, height: 700 / scale }, bar, alignment);
+    assert.ok(closed && open); assert.equal(closed.y, open.y);
+    assert.ok(closed.y >= area.y && closed.y + bar <= area.y + area.height);
+    assert.ok(open.x >= Math.floor(area.x) && open.x + open.width <= Math.ceil(area.x + area.width) + 1);
+    assert.ok(open.y + open.height <= frame.y + frame.height);
+    assert.equal(open.edge, 'titlebar');
+  }
+  const area = { x: -700, y: 24, width: 500, height: 32 };
+  assert.equal(titlebarPosition(host, area, { width: 400, height: 50 }, 50), null);
+  assert.equal(titlebarPosition(host, { ...area, x: -1500 }, { width: 400, height: 28 }, 28), null);
+  assert.equal(cleanSettings({ dockTarget: 'titlebar' }).dockTarget, 'titlebar');
+  assert.equal(cleanSettings({ dockTarget: 'invalid' }).dockTarget, 'composer');
 });
 test('layer recovery is throttled, skips hidden/settings windows, and restores normal level when disabled', () => {
   let now = 1000, visible = true; const calls = [];
