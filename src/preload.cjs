@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('codexStatusbar', {
   },
   onCollapse: callback => ipcRenderer.on('statusbar:collapse', () => callback()),
   onCompact: callback => ipcRenderer.on('statusbar:compact', (_, layout) => callback(layout)),
+  previewOpacity: value => ipcRenderer.send('statusbar:opacity-preview', value),
+  onOpacityPreview: callback => ipcRenderer.on('statusbar:opacity-preview', (_, value) => callback(value)),
   resize: (width, height) => ipcRenderer.send('statusbar:resize', { width, height }),
   setSettings: async patch => {
     const response = await ipcRenderer.invoke('statusbar:settings', patch);

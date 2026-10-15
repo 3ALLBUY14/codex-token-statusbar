@@ -14,11 +14,12 @@ function temporaryStore(t) {
 
 test('settings survive updates and a fresh store', t => {
   const { directory, store } = temporaryStore(t);
-  store.update({ placement: 'bottom-right', scale: 1.3, allowDrag: true, offsetX: -1300 });
+  store.update({ placement: 'bottom-right', scale: 1.3, opacity: 0.65, allowDrag: true, offsetX: -1300 });
   store.update({ showToday: true });
   const restored = new SettingsStore(directory);
   assert.equal(restored.value.placement, 'bottom-right');
   assert.equal(restored.value.scale, 1.3);
+  assert.equal(restored.value.opacity, 0.65);
   assert.equal(restored.value.showToday, true);
   assert.equal(restored.value.allowDrag, true);
   assert.equal(restored.value.offsetX, -1300);

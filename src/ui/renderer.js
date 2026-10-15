@@ -8,6 +8,12 @@ let dragError = '';
 let availableWidth = null;
 let availableHeight = null;
 let lastResize = '';
+let opacityPreview = null;
+function applyOpacity() {
+  const value = opacityPreview ?? snapshot?.settings.opacity ?? 1;
+  $('bar').style.setProperty('--bar-opacity', String(value));
+  $('bar').style.setProperty('--bar-hover-opacity', String(Math.min(value, 0.45)));
+}
 const metricNames = { speed: '平均输出速度', context: '上下文', session: '会话 Token', turn: '本轮 / 上轮 Token', today: '今日 Token', cache: '缓存命中率', tools: '工具调用' };
 function renderToolGroups(target, groups, title) {
   target.replaceChildren();
@@ -97,6 +103,7 @@ function render(state) {
   snapshot = state;
   const s = state.session;
   const settings = state.settings;
+  applyOpacity();
   document.documentElement.classList.toggle('light', !state.dark);
   document.body.style.zoom = settings.scale;
   $('shell').classList.toggle('bottom', settings.placement !== 'top-right');
@@ -204,6 +211,7 @@ $('bar').addEventListener('pointercancel', event => finishDrag(event, 'cancel'))
 $('bar').addEventListener('lostpointercapture', event => finishDrag(event, 'cancel'));
 new ResizeObserver(measure).observe($('shell'));
 api.onSnapshot(render);
+api.onOpacityPreview(value => { opacityPreview = value; applyOpacity(); });
 api.onCompact(layout => { availableWidth = layout.availableWidth; availableHeight = layout.availableHeight; $('shell').classList.toggle('compact', layout.compact); measure(); });
 api.onCollapse(() => $('bar').classList.remove('pointer-near'));
 api.onDragError(message => { dragError = message; if (snapshot) render(snapshot); });

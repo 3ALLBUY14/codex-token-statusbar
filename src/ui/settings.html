@@ -38,6 +38,8 @@
       <div class="setting-row"><label for="placement">跟随窗口的位置</label><select id="placement" data-setting="placement"><option value="top-right">右上方</option><option value="bottom-right">右下方</option><option value="bottom-center">底部居中</option></select></div>
       <div class="setting-row"><label for="theme">主题</label><select id="theme" data-setting="theme"><option value="system">跟随 Windows</option><option value="dark">深色</option><option value="light">浅色</option></select></div>
       <div class="setting-row"><label for="scale">缩放</label><select id="scale" data-setting="scale"><option value="0.75">75%</option><option value="0.85">85%</option><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option><option value="1.5">150%</option></select></div>
+      <div class="setting-row"><label for="opacity">浮条不透明度</label><div class="opacity-control"><input id="opacity" type="range" min="20" max="100" step="5" value="100" data-setting="opacity" aria-describedby="opacity-note" aria-valuetext="100%"><output id="opacity-value" for="opacity">100%</output></div></div>
+      <p class="settings-note" id="opacity-note">数值越低越透明，拖动预览、松开保存。仅影响浮条，明细与设置保持清晰；鼠标进入时继续半透明避让。</p>
       <label class="drag-option"><input type="checkbox" data-setting="allowDrag">允许自由拖动浮条</label>
       <p class="settings-note">开启后拖动浮条的指标或空白处，松开鼠标自动保存位置。C 和设置按钮仍可点击。</p>
       <label><input type="checkbox" data-setting="rememberDisplayPositions">按显示器记住浮条位置</label>

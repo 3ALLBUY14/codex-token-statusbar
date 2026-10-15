@@ -29,8 +29,8 @@ button:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2p
 .shell.bottom .statusbar { order: 2; }
 .shell.bottom .details { order: 1; }
 .statusbar.zusage-root { position: relative; width: max-content; max-width: calc(100vw - 16px); padding: 5px 7px; min-height: 36px; font-size: 13px; backdrop-filter: none; }
-.statusbar { transition: opacity 160ms ease; }
-.statusbar.pointer-near { opacity: .45; }
+.statusbar { opacity: var(--bar-opacity, 1); transition: opacity 160ms ease; }
+.statusbar.pointer-near { opacity: var(--bar-hover-opacity, .45); }
 .statusbar.draggable, .statusbar.draggable .metric { cursor: grab; user-select: none; touch-action: none; }
 .statusbar.dragging, .statusbar.dragging .metric { cursor: grabbing; }
 .drag-option { margin-top: 16px; font-size: 13px; }
@@ -114,6 +114,10 @@ select { max-width: 300px; }
 input[type=number] { width: 112px; }
 .full-select { display: block; width: 100%; max-width: none; }
 .settings-note { color: var(--color-foreground-subtle); font-size: 12px; line-height: 1.7; margin: 12px 0 0; }
+.opacity-control { display: flex; align-items: center; gap: 12px; width: min(240px, 65%); }
+.opacity-control input { flex: 1; width: 0; min-width: 0; margin: 0; accent-color: var(--color-brand); cursor: pointer; }
+.opacity-control output { min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+.opacity-control input:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 4px; }
 .status-line { color: var(--color-foreground-subtle); font-size: 12px; margin-bottom: 12px; }
 .tool-details-link { display: inline-block; margin-top: 12px; color: var(--color-brand); font-size: 12px; }
 .tool-chat { margin: 0 0 10px; overflow-wrap: anywhere; }

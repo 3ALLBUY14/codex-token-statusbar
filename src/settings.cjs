@@ -5,7 +5,7 @@ const { UUID } = require('./codex-ipc.cjs');
 const { cleanProfiles } = require('./display-position.cjs');
 
 const DEFAULTS = Object.freeze({
-  theme: 'system', placement: 'top-right', scale: 1, alwaysVisible: false,
+  theme: 'system', placement: 'top-right', scale: 1, opacity: 1, alwaysVisible: false,
   showSpeed: true, showContext: true, showSession: true, showTurn: false,
   showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null,
   offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false,
@@ -21,6 +21,7 @@ function cleanSettings(input, previous = DEFAULTS) {
   if (['system', 'dark', 'light'].includes(input.theme)) result.theme = input.theme;
   if (['top-right', 'bottom-right', 'bottom-center'].includes(input.placement)) result.placement = input.placement;
   if (Number.isFinite(input.scale)) result.scale = Math.max(0.75, Math.min(1.5, input.scale));
+  if (Number.isFinite(input.opacity)) result.opacity = Math.round(Math.max(0.2, Math.min(1, input.opacity)) * 100) / 100;
   if (input.pinnedThreadId === null || UUID.test(input.pinnedThreadId ?? '')) result.pinnedThreadId = input.pinnedThreadId;
   if (input.contextOverride === null || Number.isSafeInteger(input.contextOverride) && input.contextOverride >= 1000 && input.contextOverride <= 10000000) result.contextOverride = input.contextOverride;
   for (const key of ['offsetX', 'offsetY']) if (Number.isFinite(input[key])) result[key] = Math.max(-20000, Math.min(20000, Math.round(input[key])));

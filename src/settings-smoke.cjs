@@ -15,7 +15,7 @@ async function checkSettingsFeatures({ win, state, settings, setFixture, artifac
   }
   fixture.session.toolUsage = { records: fixture.session.toolUsage.records, total: 45, failed: [...groups.values()].reduce((n, g) => n + g.failed, 0), timed: 45, durationMs: [...groups.values()].reduce((n, g) => n + g.durationMs, 0), byType: [...groups.values()] };
   fixture.session.runningTools = [{ key: 'running-demo', label: '扩展操作', name: 'mcp__demo__wait', type: 'Extension', status: 'running', timestamp: new Date(Date.now() - 3000).toISOString(), durationMs: null, exitCode: null }];
-  settings.update({ pinnedThreadId: fixture.sessions[44].id, contextOverride: 123000, offsetX: 40, offsetY: 50, allowDrag: true, theme: 'dark', showTools: true });
+  settings.update({ pinnedThreadId: fixture.sessions[44].id, contextOverride: 123000, offsetX: 40, offsetY: 50, allowDrag: true, theme: 'dark', opacity: 0.65, showTools: true });
   setFixture(fixture); await pause(200);
   const result = await win.webContents.executeJavaScript(`(() => {
     document.getElementById('tab-chat').click();
@@ -50,9 +50,9 @@ async function checkSettingsFeatures({ win, state, settings, setFixture, artifac
   if (Object.values(result).some(value => !value)) throw new Error('Settings feature check failed: ' + JSON.stringify(result));
   await win.webContents.executeJavaScript("document.getElementById('reset').click()"); await pause(200);
   result.resetPreservedBinding = settings.value.pinnedThreadId === fixture.sessions[44].id && settings.value.offsetX === 40 && settings.value.contextOverride === 123000 && settings.value.allowDrag;
-  result.resetApplied = settings.value.theme === 'system' && settings.value.showTools === false;
+  result.resetApplied = settings.value.theme === 'system' && settings.value.showTools === false && settings.value.opacity === 1;
   await win.webContents.executeJavaScript("document.getElementById('undo-reset').click()"); await pause(200);
-  result.undoWorked = settings.value.theme === 'dark' && settings.value.showTools === true;
+  result.undoWorked = settings.value.theme === 'dark' && settings.value.showTools === true && settings.value.opacity === 0.65;
   const diagnostic = await win.webContents.executeJavaScript("window.codexStatusbar.copyDiagnostics()");
   result.diagnosticPrivate = diagnostic.ok && !/演示聊天|threadId|records|mcp__demo/.test(diagnostic.text);
   await win.webContents.executeJavaScript("document.getElementById('tab-diagnostics').click(); document.getElementById('check-update').click()"); await pause(150);

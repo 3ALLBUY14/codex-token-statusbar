@@ -1,4 +1,4 @@
-# Codex Token 状态条 V1.4（Windows）
+# Codex Token 状态条 V1.5（Windows）
 
 为 Codex 桌面版提供一个跟随窗口的独立浮条。基于
 [zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar)
@@ -15,7 +15,7 @@
 
 ## 开始使用
 
-从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.4-Windows-x64.zip`。
+从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.5-Windows-x64.zip`。
 
 安装版：解压整个压缩包，双击 **`安装.cmd`**，选择是否开机启动和创建桌面入口，再点击“安装并启动”。安装到当前用户目录，无需管理员权限。可在 Windows“设置 → 应用”中卸载。
 
@@ -32,6 +32,7 @@
 8. 设置页的“运行诊断”显示聊天连接、窗口跟随、浮条可见性和日志读取状态，便于定位升级后浮条不出现的问题。
 9. 窄窗口或高缩放下，浮条用 `+N` 表示收纳的指标；点击 C 可在明细中查看全部收纳项。窗口跟随助手每两秒报告一次状态，设置页显示最后响应时间，超时后自动重启。
 10. 默认按 Codex 所在显示器分别记住位置，支持把浮条拖到另一显示器；目标屏幕断开后回到可用屏幕。可以关闭位置记忆；“恢复浮条位置”清除全部显示器位置记忆。
+11. 设置 → 显示 → 位置与外观中可调整“浮条不透明度”（20%–100%）。拖动实时预览、松开保存；Esc 取消未提交预览，关闭或重新加载设置也会取消预览。仅影响浮条，明细和设置保持清晰；鼠标进入浮条时最多显示为 45% 不透明度，较低值保持原样。恢复默认显示会恢复到 100%，可撤销。
 
 安装时可以选择登录 Windows 自动启动，也可重新安装取消该选项。更新安装版会保留显示偏好和快捷方式选项；安装器先校验暂存副本，再替换旧版，安装失败时恢复旧版。旧便携版需要先从托盘退出。偏好设置保存在
 `%APPDATA%\CodexTokenStatusbar\settings.json`，需要彻底清除时可自行删除该目录。

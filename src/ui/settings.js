@@ -49,8 +49,9 @@ api.onSnapshot(state => {
   for (const input of document.querySelectorAll('[data-setting]')) {
     if (input === document.activeElement || input.id === 'chat') continue;
     const value = state.settings[input.dataset.setting];
-    if (input.type === 'checkbox') input.checked = value; else input.value = value ?? '';
+    if (input.type === 'checkbox') input.checked = value; else input.value = input.id === 'opacity' ? Math.round((value ?? 1) * 100) : value ?? '';
   }
+  opacityLabel();
   renderChats(); window.toolPanel.update(state);
   $('connection').textContent = `${state.selection.connected ? '已连接 · ' : ''}${labels[state.selection.mode]} · ${state.health.sessionCount} 个本地聊天`;
   const runtime = state.runtime ?? {};
@@ -78,14 +79,27 @@ async function save(patch) {
   try { await api.setSettings(patch); $('save-status').textContent = ''; return true; }
   catch (error) { $('save-status').textContent = error.message || '设置未能保存，请稍后重试。'; return false; }
 }
-document.addEventListener('change', event => {
+function opacityLabel() {
+  const value = `${$('opacity').value}%`;
+  $('opacity-value').textContent = value;
+  $('opacity').setAttribute('aria-valuetext', value);
+}
+$('opacity').addEventListener('input', () => { opacityLabel(); api.previewOpacity(Number($('opacity').value) / 100); });
+$('opacity').addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault(); $('opacity').value = Math.round((current?.settings.opacity ?? 1) * 100); opacityLabel(); api.previewOpacity(null);
+});
+$('opacity').addEventListener('blur', () => api.previewOpacity(null));
+document.addEventListener('change', async event => {
   const input = event.target, key = input.dataset.setting;
   if (!key) return;
   resetPatch = null; $('undo-reset').hidden = true; $('reset-message').textContent = '';
   let value = input.type === 'checkbox' ? input.checked : input.value;
   if (['scale', 'offsetX', 'offsetY', 'contextOverride'].includes(key)) value = value === '' ? null : Number(value);
   if (key === 'pinnedThreadId') value ||= null;
-  void save({ [key]: value });
+  if (key === 'opacity') value = Number(value) / 100;
+  const saved = await save({ [key]: value });
+  if (key === 'opacity' && !saved) { input.value = Math.round((current?.settings.opacity ?? 1) * 100); opacityLabel(); api.previewOpacity(null); }
 });
 $('chat-search').addEventListener('input', renderChats);
 $('chat').addEventListener('blur', renderChats);
@@ -97,7 +111,7 @@ $('restore-position').addEventListener('click', () => api.restorePosition());
 $('quit').addEventListener('click', () => api.quit());
 $('reset').addEventListener('click', async () => {
   if (!current) return;
-  const defaults = { theme: 'system', scale: 1, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: false };
+  const defaults = { theme: 'system', scale: 1, opacity: 1, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: false };
   const previous = Object.fromEntries(Object.keys(defaults).map(key => [key, current.settings[key]]));
   if (await save(defaults)) { resetPatch = previous; $('undo-reset').hidden = false; $('reset-message').textContent = '显示项已恢复默认，聊天锁定、窗口容量和浮条位置保留。'; }
 });

@@ -40,6 +40,10 @@ let settingsWantsTools = false;
 let catalogCache = null;
 let catalogSignature = '';
 let updateRequest = null;
+function previewOpacity(value) {
+  const opacity = Number.isFinite(value) ? Math.max(0.2, Math.min(1, value)) : null;
+  if (overlay && !overlay.isDestroyed()) overlay.webContents.send('statusbar:opacity-preview', opacity);
+}
 
 function updateActivity() {
   const active = hostVisible || Boolean(settingsWindow?.isVisible());
@@ -293,12 +297,13 @@ function openSettings() {
   settingsWindow.setMenu(null);
   settingsWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   settingsWindow.webContents.on('will-navigate', event => event.preventDefault());
+  settingsWindow.webContents.on('did-start-loading', () => previewOpacity(null));
   const opened = settingsWindow;
   opened.once('ready-to-show', () => { if (!opened.isDestroyed()) { opened.show(); opened.focus(); updateActivity(); publish(); } });
   settingsWindow.loadFile(path.join(__dirname, 'ui', 'settings.html'));
   settingsWindow.on('focus', positionOverlay);
   settingsWindow.on('blur', positionOverlay);
-  settingsWindow.on('closed', () => { settingsWindow = null; settingsWantsTools = false; positionOverlay(); });
+  settingsWindow.on('closed', () => { previewOpacity(null); settingsWindow = null; settingsWantsTools = false; positionOverlay(); });
 }
 
 function buildTray() {
@@ -377,7 +382,8 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 18 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 19 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
     document.getElementById('open-tool-details').click();
     const list = document.getElementById('settings-tool-records');
@@ -513,6 +519,7 @@ async function smokeCheck() {
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
   const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
   report.settingsFeatures = settingsFeatures;
+  report.opacity = opacityCheck;
   fs.writeFileSync(path.join(artifactDirectory, 'smoke-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ smoke: 'passed', health: report.health, ipcConnected: report.ipcConnected, selectionMode: report.selectionMode, overflow: layout.overflow }));
   app.quit();
@@ -545,6 +552,7 @@ else {
       positionOverlay();
     });
     ipcMain.on('statusbar:drag', (event, action, point) => { if (event.sender === overlay.webContents && ['start', 'move', 'end', 'cancel'].includes(action)) dragOverlay(action, point); });
+    ipcMain.on('statusbar:opacity-preview', (event, value) => { if (settingsWindow && event.sender === settingsWindow.webContents) previewOpacity(value); });
     ipcMain.on('statusbar:open-settings', event => { if (validSender(event)) openSettings(); });
     ipcMain.on('statusbar:restore-position', event => { if (validSender(event)) restorePosition(); });
     ipcMain.on('statusbar:refresh', event => { if (validSender(event)) { ipc.refreshBinding(); store.scan(); } });
@@ -587,11 +595,13 @@ else {
       let value;
       try { value = updatePositionSettings(patch); }
       catch (error) {
+        if (patch && Object.hasOwn(patch, 'opacity')) previewOpacity(null);
         const code = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'UNKNOWN';
         const message = code === 'ENOSPC' ? '磁盘空间不足，设置未保存。' : ['EACCES', 'EPERM'].includes(code) ? `设置文件无法写入（${code}），请检查目录权限或安全软件拦截。` : `设置未能保存（${code}），请稍后重试。`;
         return { ok: false, error: { code, message } };
       }
       publish();
+      if (patch && Object.hasOwn(patch, 'opacity')) previewOpacity(null);
       positionOverlay();
       return { ok: true, value };
     });
