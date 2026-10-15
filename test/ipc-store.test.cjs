@@ -141,6 +141,47 @@ test('incremental reads wait for a completed line and restart after file truncat
   assert.equal(tail.accumulator.hasUsage, false);
 });
 
+test('unreadable directories preserve cached usage, report partial data and recover', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-read-error-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'sessions');
+  await fs.mkdir(root);
+  const filename = path.join(root, 'a.jsonl');
+  await fs.writeFile(filename, records(id1));
+  const store = new SessionStore(directory); t.after(() => store.stop());
+  await store.scan();
+  const original = fs.readdir;
+  const mocked = t.mock.method(fs, 'readdir', async (name, ...args) => {
+    if (name === root) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    return original(name, ...args);
+  });
+  await store.scan();
+  assert.equal(store.snapshot().today.usage.total_tokens, 110);
+  assert.equal(store.snapshot().health.sessionCount, 1);
+  assert.equal(store.snapshot().health.readErrors, 1);
+  assert.equal(store.snapshot().today.partial, true);
+  mocked.mock.restore();
+  await store.scan();
+  assert.equal(store.snapshot().health.readErrors, 0);
+  assert.equal(store.snapshot().today.partial, false);
+  await fs.unlink(filename); await store.scan();
+  assert.equal(store.snapshot().health.sessionCount, 0);
+});
+
+test('dirty refresh avoids directory scans and cached snapshots cannot be changed by callers', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-dirty-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'sessions'); await fs.mkdir(root);
+  const filename = path.join(root, 'a.jsonl'); await fs.writeFile(filename, records(id1));
+  const store = new SessionStore(directory); t.after(() => store.stop()); await store.scan();
+  const mocked = t.mock.method(fs, 'readdir', () => { throw new Error('unexpected discovery'); });
+  store.dirty.add(filename); await store.scan(false);
+  assert.equal(mocked.mock.callCount(), 0); mocked.mock.restore();
+  const snapshot = store.snapshot({}, { threadId: id1 }); snapshot.session.context.capacity = 42;
+  assert.equal(store.snapshot({}, { threadId: id1 }).session.context.capacity, 1000);
+  assert.equal(store.snapshot({}, {}, { includeSessions: false }).sessions.length, 0);
+});
+
 test('session copies and archived duplicates are counted once in daily totals', async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-statusbar-test-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

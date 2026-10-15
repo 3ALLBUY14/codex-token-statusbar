@@ -6,7 +6,8 @@ const TOOL_LABELS = Object.freeze({ CommandExecution: '命令执行', FileChange
 const TOOL_RECORD_LIMIT = 200;
 const emptyUsage = () => ({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0, total_tokens: 0 });
 const emptyToolStats = () => ({ total: 0, failed: 0, durationMs: 0, timed: 0, byType: new Map(), records: [] });
-const toolSnapshot = stats => ({ total: stats.total, failed: stats.failed, durationMs: stats.durationMs, timed: stats.timed, byType: [...stats.byType.values()].map(group => ({ ...group })), records: stats.records.map(record => ({ ...record })) });
+const toolSnapshot = (stats, includeRecords = true) => ({ total: stats.total, failed: stats.failed, durationMs: stats.durationMs, timed: stats.timed, byType: [...stats.byType.values()].map(group => ({ ...group })), records: includeRecords ? stats.records.map(record => ({ ...record })) : [] });
+const toolName = item => { const value = item.tool_name ?? item.function_name ?? (item.type === 'Extension' ? item.name : null); return typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value) ? value : null; };
 
 function addTool(stats, item, failed, durationMs, timestamp) {
   const group = stats.byType.get(item.type) ?? { type: item.type, label: TOOL_LABELS[item.type], total: 0, failed: 0, durationMs: 0, timed: 0 };
@@ -17,7 +18,7 @@ function addTool(stats, item, failed, durationMs, timestamp) {
   stats.byType.set(item.type, group);
   // Retain only bounded, structured metadata; never command arguments or output.
   stats.records.push({
-    sequence: stats.total, type: item.type, label: TOOL_LABELS[item.type],
+    sequence: stats.total, type: item.type, label: TOOL_LABELS[item.type], name: toolName(item),
     status: failed ? 'failed' : 'completed', durationMs,
     timestamp: typeof timestamp === 'string' && timestamp.length <= 64 && Number.isFinite(Date.parse(timestamp)) ? timestamp : null,
     exitCode: Number.isSafeInteger(item.exit_code) ? item.exit_code : null,
@@ -99,6 +100,8 @@ class SessionAccumulator {
     this.malformedLines = 0;
     this.toolIds = new Set();
     this.toolStats = emptyToolStats();
+    this.runningTools = new Map();
+    this.toolOrigins = new Map();
     this.contextExceeded = false;
   }
 
@@ -131,8 +134,24 @@ class SessionAccumulator {
     }
     // Forked histories can carry snapshots belonging to another logical thread.
     if (this.id && this.ownerId && this.ownerId !== this.id) return;
-    if (p.type === 'item_completed' && p.item && Object.hasOwn(TOOL_LABELS, p.item.type)) {
+    if (p.type === 'item_started' && p.item && Object.hasOwn(TOOL_LABELS, p.item.type)) {
       const item = p.item;
+      if (typeof item.id !== 'string' || item.id.length > 256 || this.toolIds.has(item.id)) return;
+      if (!this.runningTools.has(item.id)) this.runningTools.set(item.id, {
+        key: item.id, type: item.type, label: TOOL_LABELS[item.type], name: toolName(item), status: 'running',
+        timestamp: typeof row.timestamp === 'string' && row.timestamp.length <= 64 && Number.isFinite(Date.parse(row.timestamp)) ? row.timestamp : null,
+        durationMs: null, exitCode: null, turnId: p.turn_id ?? this.activeTurn?.id ?? null,
+      });
+      this.toolOrigins.set(item.id, this.runningTools.get(item.id));
+      if (this.runningTools.size > TOOL_RECORD_LIMIT) this.runningTools.delete(this.runningTools.keys().next().value);
+      if (this.toolOrigins.size > TOOL_RECORD_LIMIT) this.toolOrigins.delete(this.toolOrigins.keys().next().value);
+      return;
+    }
+    if (p.type === 'item_completed' && p.item && Object.hasOwn(TOOL_LABELS, p.item.type)) {
+      const started = this.toolOrigins.get(p.item.id) ?? this.runningTools.get(p.item.id);
+      const item = { ...p.item, tool_name: toolName(p.item) ?? started?.name };
+      this.runningTools.delete(item.id);
+      this.toolOrigins.delete(item.id);
       if (typeof item.id === 'string' && item.id.length <= 256) {
         if (this.toolIds.has(item.id)) return;
         this.toolIds.add(item.id);
@@ -140,7 +159,8 @@ class SessionAccumulator {
       const failed = item.status === 'failed' || Number.isSafeInteger(item.exit_code) && item.exit_code !== 0 || Boolean(item.failure);
       const durationMs = toolDurationMs(item.duration);
       addTool(this.toolStats, item, failed, durationMs, row.timestamp);
-      if (this.activeTurn) addTool(this.activeTurn.toolStats, item, failed, durationMs, row.timestamp);
+      const ownerTurn = p.turn_id ?? started?.turnId;
+      if (this.activeTurn && (!ownerTurn || ownerTurn === this.activeTurn.id)) addTool(this.activeTurn.toolStats, item, failed, durationMs, row.timestamp);
       return;
     }
     if (p.type === 'task_started') {
@@ -236,11 +256,15 @@ class SessionAccumulator {
       if (this.lastTurn.speed) this.lastTurn.speed.baselineInferred = Boolean(turn.baselineInferred);
       if (p.error) this.lastTurn.speed = null;
       this.turnCount++;
+      for (const [key, item] of this.runningTools) if (item.turnId === turn.id) this.runningTools.delete(key);
       this.activeTurn = null;
       return;
     }
     if (p.type === 'turn_aborted') {
+      if (p.turn_id) for (const [key, item] of this.runningTools) if (item.turnId === p.turn_id) this.runningTools.delete(key);
+      if (p.turn_id && this.activeTurn?.id && p.turn_id !== this.activeTurn.id) return;
       if (this.activeTurn) {
+        for (const [key, item] of this.runningTools) if (item.turnId === this.activeTurn.id) this.runningTools.delete(key);
         this.contextExceeded = false;
         this.lastTurn = { tokens: null, speed: null, durationMs: null, firstTokenMs: null, requests: this.activeTurn.requests, toolUsage: toolSnapshot(this.activeTurn.toolStats), status: 'interrupted', completedAt: row.timestamp ?? null };
         this.activeTurn = null;
@@ -252,7 +276,7 @@ class SessionAccumulator {
     return !this.parentId && (this.source === 'vscode' || this.source === 'desktop' || /codex.*desktop|chatgpt|codex.*app/i.test(this.originator ?? ''));
   }
 
-  snapshot() {
+  snapshot(includeRecords = true) {
     const activeTokens = this.activeTurn ? emptyUsage() : null;
     if (activeTokens) {
       for (const key of TOKEN_FIELDS) activeTokens[key] = Math.max(0, this.totals[key] - this.activeTurn.baseline[key]);
@@ -271,13 +295,15 @@ class SessionAccumulator {
         ...contextStatus(contextPercent, this.contextWindow),
         exceeded: this.contextExceeded,
       },
-      toolUsage: toolSnapshot(this.toolStats),
-      turnToolUsage: this.activeTurn ? toolSnapshot(this.activeTurn.toolStats) : this.lastTurn?.toolUsage ?? null,
+      toolUsage: toolSnapshot(this.toolStats, includeRecords),
+      turnToolUsage: this.activeTurn ? toolSnapshot(this.activeTurn.toolStats, includeRecords) : this.lastTurn ? { ...this.lastTurn.toolUsage, records: includeRecords ? this.lastTurn.toolUsage.records : [] } : null,
+      runningTools: includeRecords ? [...this.runningTools.values()].map(({ turnId, ...record }) => ({ ...record })) : [],
+      turnRunningTools: includeRecords && this.activeTurn ? [...this.runningTools.values()].filter(item => item.turnId === this.activeTurn.id).map(({ turnId, ...record }) => ({ ...record })) : [],
       turnRequests: this.activeTurn ? this.activeTurn.requests : this.lastTurn?.requests ?? null,
       cacheHitPercent: this.totals.input_tokens > 0 ? this.totals.cached_input_tokens * 100 / this.totals.input_tokens : null,
       active: Boolean(this.activeTurn),
       turnTokens: activeTokens ?? this.lastTurn?.tokens ?? null,
-      lastTurn: this.lastTurn,
+      lastTurn: this.lastTurn ? { ...this.lastTurn, toolUsage: { ...this.lastTurn.toolUsage, records: includeRecords ? this.lastTurn.toolUsage.records : [] } } : null,
       turnCount: this.turnCount,
       updatedAt: this.lastUpdatedAt,
       accountingWarning: this.accountingWarning,

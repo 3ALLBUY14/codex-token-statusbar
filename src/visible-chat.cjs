@@ -20,7 +20,10 @@ class VisibleChat extends EventEmitter {
     this.changedAt = 0;
     this.busy = false;
     this.stopped = false;
+    this.active = true;
+    this.lastPolledAt = 0;
   }
+  setActive(active) { this.active = Boolean(active); }
   observe(title, processId, handle) {
     const value = typeof title === 'string' && title.trim() && title.length <= 2048 ? title : null;
     if (value === this.title && processId === this.processId && handle === this.handle) return;
@@ -37,6 +40,8 @@ class VisibleChat extends EventEmitter {
   titleForId(id) { return this.byId.get(id) ?? null; }
   async scan() {
     if (this.busy || this.stopped) return;
+    if (!this.active && Date.now() - this.lastPolledAt < 5000) return;
+    this.lastPolledAt = Date.now();
     this.busy = true;
     try {
       const stat = await fs.stat(this.filename);
@@ -67,17 +72,21 @@ class VisibleChat extends EventEmitter {
   stop() { this.stopped = true; clearInterval(this.timer); }
 }
 
-function resolveVisibleSelection(navigation, title, hasRouteTitle = false) {
+function resolveVisibleSelection(navigation, title, hasRouteTitle = false, now = Date.now()) {
+  if (title.observed && title.indexed && title.ids.length > 1 &&
+      (!navigation.known || navigation.ambiguous || !title.ids.includes(navigation.threadId) || navigation.time < title.changedAt || now - navigation.time > 60000)) {
+    return { threadId: null, ambiguous: true, viewKnown: true, source: 'visible-document-title', confidence: 'uncertain', reason: 'duplicate-title' };
+  }
   if (navigation.known && !navigation.ambiguous) {
     const consistent = !title.observed || !title.indexed ||
       title.ids.includes(navigation.threadId) ||
       (navigation.threadId && !hasRouteTitle && title.ids.length === 0);
     if (consistent || navigation.time >= title.changedAt) {
-      return { ...navigation, viewKnown: true };
+      return { ...navigation, viewKnown: true, confidence: 'route' };
     }
   }
   if (title.observed && title.indexed) {
-    return { threadId: title.ids.length === 1 ? title.ids[0] : null, ambiguous: title.ids.length > 1, viewKnown: true, source: 'visible-document-title' };
+    return { threadId: title.ids.length === 1 ? title.ids[0] : null, ambiguous: title.ids.length > 1, viewKnown: true, source: 'visible-document-title', confidence: title.ids.length === 1 ? 'title' : 'uncertain' };
   }
   if (navigation.known || navigation.ambiguous) return { ...navigation, viewKnown: navigation.known };
   return { threadId: null, ambiguous: false, viewKnown: false, source: null };

@@ -22,4 +22,8 @@ contextBridge.exposeInMainWorld('codexStatusbar', {
   drag: (action, point) => ipcRenderer.send('statusbar:drag', action, point),
   onDragError: callback => ipcRenderer.on('statusbar:drag-error', (_, message) => callback(message)),
   quit: () => ipcRenderer.send('statusbar:quit'),
+  toolInterest: enabled => ipcRenderer.send('statusbar:tool-interest', enabled === true),
+  copyDiagnostics: () => ipcRenderer.invoke('statusbar:copy-diagnostics'),
+  checkUpdate: () => ipcRenderer.invoke('statusbar:check-update'),
+  openRelease: () => ipcRenderer.invoke('statusbar:open-release'),
 });

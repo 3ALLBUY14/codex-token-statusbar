@@ -16,8 +16,11 @@ test('a changed title supersedes a stale route; a newer route supersedes a cache
   assert.equal(resolveVisibleSelection({ ...route, time: 300 }, title, true).threadId, first);
 });
 
-test('matching IDs keep the route authoritative even for duplicate titles', () => {
-  const result = resolveVisibleSelection(route, { ...title, ids: [first, second] }, true);
+test('duplicate titles require a newer and recent route confirmation', () => {
+  const duplicate = { ...title, ids: [first, second] };
+  assert.equal(resolveVisibleSelection(route, duplicate, true, 400).ambiguous, true);
+  assert.equal(resolveVisibleSelection({ ...route, time: 300 }, duplicate, true, 70000).ambiguous, true);
+  const result = resolveVisibleSelection({ ...route, time: 300 }, duplicate, true, 400);
   assert.equal(result.threadId, first);
   assert.equal(result.ambiguous, false);
   assert.equal(result.source, 'desktop-navigation');

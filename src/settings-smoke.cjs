@@ -1,0 +1,66 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function checkSettingsFeatures({ win, state, settings, setFixture, artifactDirectory }) {
+  const previous = { ...settings.value };
+  const fixture = structuredClone(state);
+  fixture.sessions = Array.from({ length: 45 }, (_, index) => ({ id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`, title: `演示聊天 ${index + 1}`, model: 'Codex', tokens: index * 100, active: false }));
+  const original = fixture.session.toolUsage.records;
+  fixture.session.toolUsage.records = Array.from({ length: 45 }, (_, index) => ({ ...original[index % original.length], sequence: index + 1, name: original[index % original.length].type === 'CommandExecution' ? 'exec_command' : 'apply_patch', durationMs: index * 1000 }));
+  const groups = new Map();
+  for (const record of fixture.session.toolUsage.records) {
+    const group = groups.get(record.type) ?? { type: record.type, label: record.label, total: 0, failed: 0, timed: 0, durationMs: 0 };
+    group.total++; group.failed += record.status === 'failed' ? 1 : 0; group.timed++; group.durationMs += record.durationMs; groups.set(record.type, group);
+  }
+  fixture.session.toolUsage = { records: fixture.session.toolUsage.records, total: 45, failed: [...groups.values()].reduce((n, g) => n + g.failed, 0), timed: 45, durationMs: [...groups.values()].reduce((n, g) => n + g.durationMs, 0), byType: [...groups.values()] };
+  fixture.session.runningTools = [{ key: 'running-demo', label: '扩展操作', name: 'mcp__demo__wait', type: 'Extension', status: 'running', timestamp: new Date(Date.now() - 3000).toISOString(), durationMs: null, exitCode: null }];
+  settings.update({ pinnedThreadId: fixture.sessions[44].id, contextOverride: 123000, offsetX: 40, offsetY: 50, allowDrag: true, theme: 'dark', showTools: true });
+  setFixture(fixture); await pause(200);
+  const result = await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('tab-chat').click();
+    const search = document.getElementById('chat-search');
+    document.getElementById('chat-next').click();
+    const paged = document.getElementById('chat-page').textContent.startsWith('2 / 3');
+    search.value = '演示聊天 45'; search.dispatchEvent(new Event('input', { bubbles: true }));
+    const foundOlderChat = document.getElementById('chat-page').textContent.includes('1 个匹配') && document.getElementById('chat').innerText.includes('演示聊天 45');
+    search.value = ''; search.dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('tab-tools').click();
+    const list = document.getElementById('settings-tool-records');
+    const boundedPage = list.children.length === 20;
+    document.getElementById('tool-next').click();
+    const nextPage = document.getElementById('tool-page').textContent.startsWith('2 / 3');
+    const category = document.getElementById('tool-category'); category.value = 'FileChange'; category.dispatchEvent(new Event('change', { bubbles: true }));
+    const categoryWorks = [...list.children].every(row => row.innerText.includes('文件修改'));
+    category.value = 'all'; category.dispatchEvent(new Event('change', { bubbles: true }));
+    const sort = document.getElementById('tool-sort'); sort.value = 'duration'; sort.dispatchEvent(new Event('change', { bubbles: true }));
+    const slowestFirst = list.firstElementChild.innerText.includes('#45');
+    const runningVisible = document.getElementById('settings-running-tools').innerText.includes('mcp__demo__wait');
+    const toolSearch = document.getElementById('tool-search'); toolSearch.value = 'exec_command'; toolSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    const nameSearchWorks = [...list.children].every(row => row.innerText.includes('exec_command')) && list.children.length > 0;
+    toolSearch.value = ''; toolSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    sort.value = 'newest'; sort.dispatchEvent(new Event('change', { bubbles: true }));
+    const firstNode = list.firstElementChild;
+    window.toolPanel.refresh();
+    const stableNodes = firstNode === list.firstElementChild;
+    const tab = document.getElementById('tab-display'); tab.focus(); tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    const keyboardTabs = document.getElementById('tab-chat').getAttribute('aria-selected') === 'true' && document.getElementById('tab-chat') === document.activeElement;
+    return { paged, foundOlderChat, boundedPage, nextPage, categoryWorks, slowestFirst, runningVisible, nameSearchWorks, stableNodes, keyboardTabs };
+  })()`);
+  if (Object.values(result).some(value => !value)) throw new Error('Settings feature check failed: ' + JSON.stringify(result));
+  await win.webContents.executeJavaScript("document.getElementById('reset').click()"); await pause(200);
+  result.resetPreservedBinding = settings.value.pinnedThreadId === fixture.sessions[44].id && settings.value.offsetX === 40 && settings.value.contextOverride === 123000 && settings.value.allowDrag;
+  result.resetApplied = settings.value.theme === 'system' && settings.value.showTools === false;
+  await win.webContents.executeJavaScript("document.getElementById('undo-reset').click()"); await pause(200);
+  result.undoWorked = settings.value.theme === 'dark' && settings.value.showTools === true;
+  const diagnostic = await win.webContents.executeJavaScript("window.codexStatusbar.copyDiagnostics()");
+  result.diagnosticPrivate = diagnostic.ok && !/演示聊天|threadId|records|mcp__demo/.test(diagnostic.text);
+  await win.webContents.executeJavaScript("document.getElementById('tab-diagnostics').click(); document.getElementById('check-update').click()"); await pause(150);
+  result.updateWorked = await win.webContents.executeJavaScript("document.getElementById('diagnostic-action-status').textContent.includes('V99.0')");
+  await win.webContents.executeJavaScript("document.getElementById('tab-tools').click(); window.scrollTo(0, 0)"); await pause(100);
+  fs.writeFileSync(path.join(artifactDirectory, 'settings-tools-features.png'), (await win.webContents.capturePage()).toPNG());
+  if (Object.values(result).some(value => !value)) throw new Error('Settings action check failed: ' + JSON.stringify(result));
+  settings.update(previous); setFixture(null); await pause(150);
+  return result;
+}
+module.exports = { checkSettingsFeatures };

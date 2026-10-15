@@ -99,6 +99,41 @@ test('recent records are capped without losing totals and reset for the next tur
   assert.equal(result.snapshot().toolUsage.records.length, 200);
 });
 
+test('stale aborts and late tool results do not end or contaminate the new turn', () => {
+  const result = accumulator();
+  result.processEvent(event({ type: 'task_started', turn_id: 'old' }));
+  result.processEvent(event({ type: 'item_started', turn_id: 'old', item: { id: 'old-tool', type: 'Extension', name: 'mcp__files__read', arguments: 'private' } }));
+  assert.equal(result.snapshot().runningTools[0].name, 'mcp__files__read');
+  result.processEvent(event({ type: 'task_started', turn_id: 'new' }));
+  result.processEvent(event({ type: 'turn_aborted', turn_id: 'old' }));
+  assert.equal(result.snapshot().active, true);
+  assert.equal(result.snapshot().runningTools.length, 0);
+  result.processEvent(event({ type: 'item_completed', item: { id: 'old-tool', type: 'Extension', status: 'completed' } }));
+  assert.equal(result.snapshot().toolUsage.total, 1);
+  assert.equal(result.snapshot().turnToolUsage.total, 0);
+  assert.equal(result.snapshot().runningTools.length, 0);
+  assert.equal(result.snapshot().toolUsage.records[0].name, 'mcp__files__read');
+  assert.equal(JSON.stringify(result.snapshot()).includes('private'), false);
+  result.processEvent(event({ type: 'turn_aborted', turn_id: 'new' }));
+  assert.equal(result.snapshot().active, false);
+});
+
+test('running tools stay separate from completed totals and lightweight snapshots omit records', () => {
+  const result = accumulator();
+  result.processEvent(event({ type: 'task_started', turn_id: 'one' }));
+  const start = event({ type: 'item_started', item: { id: 'run', type: 'CommandExecution', tool_name: 'exec_command' } });
+  result.processEvent(start); result.processEvent(start);
+  assert.equal(result.snapshot().runningTools.length, 1);
+  assert.equal(result.snapshot().turnRunningTools.length, 1);
+  assert.equal(result.snapshot().toolUsage.total, 0);
+  assert.equal(result.snapshot(false).runningTools.length, 0);
+  result.processEvent(event({ type: 'item_completed', item: { id: 'run', type: 'CommandExecution', exit_code: 0 } }));
+  assert.equal(result.snapshot().runningTools.length, 0);
+  assert.equal(result.snapshot().toolUsage.records[0].name, 'exec_command');
+  assert.equal(result.snapshot(false).toolUsage.total, 1);
+  assert.equal(result.snapshot(false).toolUsage.records.length, 0);
+});
+
 test('turn-level tool usage and model requests reset between turns while session totals persist', () => {
   const result = accumulator();
   result.processEvent(event({ type: 'task_started', turn_id: 'one' }));

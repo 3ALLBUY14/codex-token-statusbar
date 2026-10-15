@@ -21,6 +21,7 @@ class FileTail {
     this.identity = null;
     this.accumulator = new SessionAccumulator();
     this.decoder = new JsonlDecoder(line => this.accumulator.processLine(line));
+    this.cachedSnapshots = new Map();
   }
   async refresh(budget = MAX_PASS_BYTES) {
     let handle;
@@ -32,6 +33,8 @@ class FileTail {
       this.identity = identity;
       this.mtimeMs = stat.mtimeMs;
       const snapshotSize = stat.size;
+      if (snapshotSize === this.offset) return { consumed: 0, pending: false, error: null };
+      this.cachedSnapshots.clear();
       let consumed = 0;
       const buffer = Buffer.alloc(CHUNK);
       while (this.offset < snapshotSize && consumed < budget) {
@@ -39,6 +42,7 @@ class FileTail {
         const { bytesRead } = await handle.read(buffer, 0, length, this.offset);
         if (!bytesRead) break;
         this.decoder.push(buffer.subarray(0, bytesRead));
+        this.cachedSnapshots.clear();
         this.offset += bytesRead;
         consumed += bytesRead;
         await new Promise(resolve => setImmediate(resolve));
@@ -48,27 +52,33 @@ class FileTail {
       return { consumed: 0, pending: false, error: error.code ?? 'read-error' };
     } finally { await handle?.close(); }
   }
+  snapshot(includeRecords = true) {
+    if (!this.cachedSnapshots.has(includeRecords)) this.cachedSnapshots.set(includeRecords, this.accumulator.snapshot(includeRecords));
+    return this.cachedSnapshots.get(includeRecords);
+  }
 }
 
 async function discover(root, maxFiles = 8192) {
   const filenames = [];
   const queue = [root];
   let truncated = false;
+  const failedDirectories = [];
   while (queue.length) {
     const directory = queue.shift();
     let entries;
-    try { entries = await fsp.readdir(directory, { withFileTypes: true }); } catch { continue; }
+    try { entries = await fsp.readdir(directory, { withFileTypes: true }); }
+    catch (error) { if (error.code !== 'ENOENT') failedDirectories.push(directory); continue; }
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
       const filename = path.join(directory, entry.name);
       if (entry.isDirectory()) queue.push(filename);
       else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
         filenames.push(filename);
-        if (filenames.length >= maxFiles) { truncated = true; return { filenames, truncated }; }
+        if (filenames.length >= maxFiles) { truncated = true; return { filenames, truncated, failedDirectories: [...failedDirectories, root] }; }
       }
     }
   }
-  return { filenames, truncated };
+  return { filenames, truncated, failedDirectories };
 }
 
 class SessionStore extends EventEmitter {
@@ -87,14 +97,24 @@ class SessionStore extends EventEmitter {
     this.truncated = false;
     this.readErrors = 0;
     this.revision = 0;
+    this.dirty = new Set();
+    this.needsDiscovery = true;
+    this.active = true;
+    this.lastDiscovery = 0;
+    this.cursor = 0;
+    this.fileErrors = new Map();
   }
+  setActive(active) { this.active = Boolean(active); }
   async start() {
     for (const root of this.roots) {
       try {
         const watcher = fs.watch(root, { recursive: true }, (_, filename) => {
           if (filename && !String(filename).endsWith('.jsonl')) return;
+          const changed = filename ? path.resolve(root, String(filename)) : null;
+          if (!changed || !this.files.has(changed)) this.needsDiscovery = true;
+          if (changed) this.dirty.add(changed);
           clearTimeout(this.debounce);
-          this.debounce = setTimeout(() => this.scan(), 300);
+          this.debounce = setTimeout(() => this.scan(false), this.active ? 300 : 1500);
         });
         watcher.on('error', () => {});
         this.watchers.push(watcher);
@@ -102,29 +122,50 @@ class SessionStore extends EventEmitter {
     }
     await this.scan();
     // Reconcile missed file notifications and directories created after startup.
-    this.scanTimer = setInterval(() => this.scan(), 15000);
+    this.scanTimer = setInterval(() => { if (Date.now() - this.lastDiscovery >= (this.active ? 15000 : 60000)) void this.scan(); }, 5000);
   }
-  async scan() {
+  async scan(full = true) {
     if (this.stopped) return;
-    if (this.busy) { this.rescanRequested = true; return; }
+    if (this.busy) { this.rescanRequested = true; this.needsDiscovery ||= full; return; }
     this.busy = true;
     try {
-      const discovered = await Promise.all(this.roots.map(root => discover(root)));
-      this.truncated = discovered.some(result => result.truncated);
-      const present = new Set(discovered.flatMap(result => result.filenames));
-      for (const filename of this.files.keys()) if (!present.has(filename)) this.files.delete(filename);
+      full ||= this.needsDiscovery;
+      let failedDirectories = [];
+      let present;
+      if (full) {
+        this.needsDiscovery = false;
+        const discovered = await Promise.all(this.roots.map(root => discover(root)));
+        this.truncated = discovered.some(result => result.truncated);
+        failedDirectories = discovered.flatMap(result => result.failedDirectories);
+        this.directoryErrors = failedDirectories.length;
+        present = new Set(discovered.flatMap(result => result.filenames));
+        for (const filename of this.files.keys()) if (!present.has(filename)) {
+          if (failedDirectories.some(directory => filename.startsWith(directory + path.sep))) continue;
+          this.files.delete(filename);
+          this.fileErrors.delete(filename);
+        }
+        this.lastDiscovery = Date.now();
+      } else present = new Set([...this.dirty].filter(filename => this.files.has(filename)));
+      this.dirty.clear();
       let budget = MAX_PASS_BYTES;
       let pending = false;
-      this.readErrors = 0;
-      for (const filename of present) {
+      const filenames = [...present];
+      const offset = full && filenames.length ? this.cursor % filenames.length : 0;
+      const ordered = [...filenames.slice(offset), ...filenames.slice(0, offset)];
+      this.readErrors = this.directoryErrors ?? 0;
+      for (const filename of ordered) {
         let tail = this.files.get(filename);
         if (!tail) { tail = new FileTail(filename); this.files.set(filename, tail); }
-        if (budget <= 0) { pending = true; break; }
+        if (budget <= 0) { pending = true; this.needsDiscovery = true; break; }
         const result = await tail.refresh(budget);
         budget -= result.consumed;
         pending ||= result.pending;
-        if (result.error) this.readErrors++;
+        if (result.error) this.fileErrors.set(filename, result.error);
+        else this.fileErrors.delete(filename);
+        if (result.error === 'ENOENT') this.needsDiscovery = true;
       }
+      if (full && filenames.length) this.cursor = (offset + 1) % filenames.length;
+      this.readErrors = (this.directoryErrors ?? 0) + this.fileErrors.size;
       this.indexing = pending;
       this.revision++;
       this.emit('updated');
@@ -134,7 +175,7 @@ class SessionStore extends EventEmitter {
       if (this.rescanRequested && !this.stopped) {
         this.rescanRequested = false;
         clearTimeout(this.debounce);
-        this.debounce = setTimeout(() => this.scan(), this.indexing ? 100 : 300);
+        this.debounce = setTimeout(() => this.scan(this.indexing), this.indexing ? 100 : 300);
       }
     }
   }
@@ -148,7 +189,7 @@ class SessionStore extends EventEmitter {
     }
     return [...byId.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
   }
-  snapshot(settings = {}, ipc = {}) {
+  snapshot(settings = {}, ipc = {}, { includeRecords = true, includeSessions = true } = {}) {
     const sessions = this.sessions();
     const day = localDay(Date.now());
     const today = emptyUsage();
@@ -176,15 +217,15 @@ class SessionStore extends EventEmitter {
     }
     selected ??= selectedId ? sessions.find(tail => tail.accumulator.id === selectedId) : null;
     return {
-      session: selected?.accumulator.snapshot() ?? null,
-      selection: { mode, threadId: selectedId, source: ipc.source ?? null, connected: Boolean(ipc.connected), routeCount: ipc.routeCount ?? 0 },
+      session: selected ? structuredClone(selected.snapshot(includeRecords)) : null,
+      selection: { mode, threadId: selectedId, source: ipc.source ?? null, confidence: mode === 'pinned' ? 'manual' : ipc.confidence ?? 'unknown', reason: ipc.reason ?? null, connected: Boolean(ipc.connected), routeCount: ipc.routeCount ?? 0 },
       today: { day, usage: today, partial: this.indexing || this.truncated || this.readErrors > 0 || sessions.some(tail => tail.accumulator.accountingWarning || tail.accumulator.usageIncomplete || tail.decoder.skippedLines > 0) },
-      sessions: sessions.filter(tail => tail.accumulator.isRootDesktop).slice(0, 30).map(tail => ({
+      sessions: includeSessions ? sessions.filter(tail => tail.accumulator.isRootDesktop).map(tail => ({
         id: tail.accumulator.id,
         model: tail.accumulator.model,
         tokens: tail.accumulator.hasUsage ? tail.accumulator.totals.total_tokens : null,
         active: Boolean(tail.accumulator.activeTurn),
-      })),
+      })) : [],
       health: { fileCount: this.files.size, sessionCount: sessions.length, indexing: this.indexing, truncated: this.truncated, readErrors: this.readErrors },
     };
   }

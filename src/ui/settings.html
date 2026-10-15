@@ -11,6 +11,13 @@
   <main class="settings-content">
     <h1>Codex Token 状态条</h1>
     <p class="intro">跟随当前聊天，查看 Token 和上下文。鼠标进入浮条时自动半透明，点击 C 展开或收起明细。</p>
+    <nav class="settings-tabs" role="tablist" aria-label="设置分类">
+      <button id="tab-display" role="tab" aria-controls="pane-display" aria-selected="true" data-tab="display">显示</button>
+      <button id="tab-chat" role="tab" aria-controls="pane-chat" aria-selected="false" tabindex="-1" data-tab="chat">聊天</button>
+      <button id="tab-tools" role="tab" aria-controls="pane-tools" aria-selected="false" tabindex="-1" data-tab="tools">工具</button>
+      <button id="tab-diagnostics" role="tab" aria-controls="pane-diagnostics" aria-selected="false" tabindex="-1" data-tab="diagnostics">诊断</button>
+    </nav>
+    <div id="pane-display" role="tabpanel" aria-labelledby="tab-display" data-pane="display">
     <section class="settings-group">
       <h2>浮条显示项</h2>
       <div class="check-grid">
@@ -37,13 +44,20 @@
       <div class="setting-row"><label for="offsetY">垂直偏移</label><input id="offsetY" type="number" min="-20000" max="20000" step="10" data-setting="offsetY"></div>
       <label><input type="checkbox" data-setting="alwaysVisible">切换到其他应用时仍显示</label>
     </section>
+    <details class="settings-group"><summary>统计口径说明</summary><p class="settings-note">上一轮输出 Token ÷（轮次耗时－首 Token 延迟）。缺少首 Token 时间时按完整耗时计算。包含推理输出、工具执行和多次模型调用，因此显示的是轮次平均速度。</p><p class="settings-note">缓存输入和推理输出不会重复计入总量。Token 用量不等同于套餐额度或账单。</p></details>
+    </div>
+    <div id="pane-chat" role="tabpanel" aria-labelledby="tab-chat" data-pane="chat" hidden>
     <section class="settings-group">
       <h2>聊天与上下文</h2>
       <p class="status-line" id="connection">连接中…</p>
-      <select class="full-select" id="chat" data-setting="pinnedThreadId"><option value="">自动跟随当前聊天</option></select>
+      <label class="search-label" for="chat-search">搜索聊天</label><input class="full-select" type="search" id="chat-search" placeholder="标题、模型或聊天 ID" autocomplete="off">
+      <label class="search-label" for="chat">跟随或锁定聊天</label><select class="full-select" id="chat" data-setting="pinnedThreadId"><option value="">自动跟随当前聊天</option></select>
+      <div class="pager"><button class="action-button" id="chat-prev" aria-label="上一页聊天">上一页</button><span id="chat-page" aria-live="polite"></span><button class="action-button" id="chat-next" aria-label="下一页聊天">下一页</button></div>
       <div class="setting-row"><label for="contextOverride">手动窗口容量</label><input id="contextOverride" type="number" min="1000" max="10000000" step="1000" placeholder="自动" data-setting="contextOverride"></div>
       <p class="settings-note">容量留空则使用日志记录的值。100 万 Token 以下的窗口在 70% / 85% 预警，100 万及以上在 40% / 60% 预警。多个 Codex 窗口同时打开时，可锁定一个聊天，避免混用数据。</p>
     </section>
+    </div>
+    <div id="pane-tools" role="tabpanel" aria-labelledby="tab-tools" data-pane="tools" hidden>
     <section class="settings-group" aria-labelledby="tool-details-heading">
       <h2 id="tool-details-heading">工具调用明细</h2>
       <p class="settings-note tool-chat" id="tool-chat">等待聊天数据</p>
@@ -61,23 +75,25 @@
           </table>
         </div>
         <p class="settings-note">计时表示有耗时记录的次数；耗时只合计日志提供的值。</p>
+        <div class="tool-filters"><label>类别<select id="tool-category"><option value="all">全部类别</option><option value="CommandExecution">命令执行</option><option value="FileChange">文件修改</option><option value="Extension">扩展操作</option><option value="ImageView">图像查看</option></select></label><label>排序<select id="tool-sort"><option value="newest">最近完成</option><option value="duration">耗时从长到短</option></select></label></div>
+        <label class="search-label" for="tool-search">搜索工具</label><input type="search" class="full-select" id="tool-search" placeholder="工具名称或类别" autocomplete="off">
+        <h3 class="running-heading" id="running-heading" hidden>执行中</h3><ol class="tool-records" id="settings-running-tools" aria-label="执行中的工具调用"></ol>
         <div class="tool-record-heading"><h3>最近调用</h3><label><input type="checkbox" id="tool-failed-only">只看失败记录</label></div>
         <p class="settings-note" id="tool-record-note"></p>
         <ol class="tool-records" id="settings-tool-records" aria-label="最近已完成的工具调用"></ol>
         <p class="settings-note" id="tool-empty"></p>
+        <div class="pager"><button class="action-button" id="tool-prev" aria-label="上一页调用记录">上一页</button><span id="tool-page" aria-live="polite"></span><button class="action-button" id="tool-next" aria-label="下一页调用记录">下一页</button></div>
       </details>
     </section>
-    <section class="settings-group">
-      <h2>速度怎么算</h2>
-      <p class="settings-note">上一轮输出 Token ÷（轮次耗时－首 Token 延迟）。缺少首 Token 时间时按完整耗时计算。包含推理输出、工具执行和多次模型调用，因此标记为平均输出速度，而不是纯模型生成速度。</p>
-      <p class="settings-note">所有统计来自本机日志，缓存输入和推理输出不会重复计入总量。这里的 Token 用量不等同于套餐额度或账单。</p>
-    </section>
+    </div>
+    <div id="pane-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics" data-pane="diagnostics" hidden>
     <section class="settings-group" aria-label="运行诊断">
       <h2>运行诊断</h2>
       <div class="diagnostic-rows">
         <div><span>版本</span><strong id="diag-version">—</strong></div>
         <div><span>聊天连接</span><strong id="diag-connection">—</strong></div>
         <div><span>识别方式</span><strong id="diag-source">—</strong></div>
+        <div><span>识别可信度</span><strong id="diag-confidence">—</strong></div>
         <div><span>当前聊天</span><strong id="diag-title">—</strong></div>
         <div><span>窗口跟随</span><strong id="diag-window">—</strong></div>
         <div><span>跟随助手心跳</span><strong id="diag-window-updated">—</strong></div>
@@ -86,10 +102,16 @@
         <div><span>Token 更新时间</span><strong id="diag-updated">—</strong></div>
       </div>
       <p class="settings-note" id="diag-advice"></p>
+      <div class="diagnostic-actions"><button class="action-button" id="copy-diagnostics">复制诊断</button><button class="action-button" id="check-update">检查更新</button><button class="action-button" id="open-release">打开下载页</button></div>
+      <p class="settings-note" id="diagnostic-action-status" aria-live="polite"></p>
+      <p class="settings-note">复制内容不包含聊天标题、ID、用户路径或调用正文。仅主动检查更新时访问 GitHub。</p>
     </section>
+    </div>
     <p id="save-status" aria-live="polite"></p>
     <div class="actions"><button class="action-button" id="refresh">重新检测与刷新</button><button class="action-button" id="restore-position">恢复浮条位置</button><button class="action-button" id="reset">恢复默认显示</button><button class="action-button" id="quit">退出状态条</button></div>
+    <p class="settings-note" id="reset-message" aria-live="polite"></p><button class="action-button" id="undo-reset" hidden>撤销恢复默认显示</button>
   </main>
+  <script src="tool-details.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

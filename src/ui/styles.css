@@ -85,6 +85,21 @@ body.settings-page { overflow: visible; min-height: 100vh; background: var(--col
 .settings-content .intro { color: var(--color-foreground-subtle); font-size: 13px; line-height: 1.7; margin: 0 0 22px; }
 .settings-group { background: var(--color-card); border: 1px solid var(--color-border); border-radius: 11px; padding: 16px; margin: 0 0 14px; }
 .settings-group h2 { margin: 0 0 13px; font-size: 14px; }
+[hidden] { display: none !important; }
+.settings-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; position: sticky; top: 0; z-index: 2; background: var(--color-background); padding: 8px 0 12px; margin-bottom: 8px; }
+.settings-tabs button { cursor: pointer; border-radius: 7px; padding: 9px 4px; border: 1px solid var(--color-border); }
+.settings-tabs button[aria-selected=true] { color: var(--color-brand); background: var(--color-hover); border-color: var(--color-brand); }
+.settings-group, #tool-details-heading { scroll-margin-top: 76px; }
+input[type=search] { border: 1px solid var(--color-border); color: var(--color-foreground); background: var(--color-background); border-radius: 6px; padding: 8px; font: inherit; }
+.search-label { margin: 12px 0 6px; font-size: 12px; color: var(--color-foreground-subtle); }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0; font-size: 12px; }
+.pager span { min-width: 0; overflow-wrap: anywhere; text-align: center; }
+.action-button:disabled { cursor: default; opacity: .45; }
+.tool-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.tool-filters label { flex: 1; font-size: 12px; }
+.tool-filters select { min-width: 0; flex: 1; }
+.diagnostic-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.running-heading { font-size: 13px; color: var(--color-brand); }
 .diagnostic-rows { display: grid; }
 .diagnostic-rows > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; align-items: start; padding: 7px 0; }
 .diagnostic-rows > div + div { border-top: 1px solid var(--color-border); }
@@ -112,7 +127,7 @@ input[type=number] { width: 112px; }
 .tool-record-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .tool-record-heading h3 { font-size: 13px; margin: 0; }
 .tool-record-heading label { font-size: 12px; }
-.tool-records { list-style: none; padding: 0; margin: 12px 0 0; max-height: 320px; overflow-y: auto; scrollbar-gutter: stable; }
+.tool-records { list-style: none; padding: 0; margin: 12px 0 0; }
 .tool-records li { border-top: 1px solid var(--color-border); padding: 9px 6px 9px 0; }
 .tool-record-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .tool-record-top strong { font-size: 12px; overflow-wrap: anywhere; }

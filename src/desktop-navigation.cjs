@@ -43,7 +43,10 @@ class DesktopNavigation extends EventEmitter {
     this.discoveredAt = 0;
     this.stopped = false;
     this.busy = false;
+    this.active = true;
+    this.lastPolledAt = 0;
   }
+  setActive(active) { this.active = Boolean(active); }
   status() {
     const ambiguous = this.windowCount > 1;
     return { known: Boolean(this.record), threadId: ambiguous ? null : this.record?.threadId ?? null, time: this.record?.time ?? 0, ambiguous, source: this.record ? 'desktop-navigation' : null };
@@ -83,6 +86,8 @@ class DesktopNavigation extends EventEmitter {
   }
   async scan() {
     if (this.busy || this.stopped || !this.processId) return;
+    if (!this.active && Date.now() - this.lastPolledAt < 2000) return;
+    this.lastPolledAt = Date.now();
     this.busy = true;
     const processId = this.processId;
     const before = JSON.stringify(this.status());

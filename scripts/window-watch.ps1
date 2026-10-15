@@ -134,5 +134,5 @@ do {
         $windowPrevious = $windowSample
         $lastOutput = $now
     }
-    if (!$Once) { Start-Sleep -Milliseconds 250 }
+    if (!$Once) { Start-Sleep -Milliseconds $(if ($sampleObject.visible -or $sampleObject.ownForeground) { 250 } else { 1000 }) }
 } while (!$Once)

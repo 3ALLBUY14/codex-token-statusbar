@@ -8,7 +8,7 @@ const { CodexIpc } = require('../src/codex-ipc.cjs');
   ipc.start();
   await store.scan();
   await new Promise(resolve => setTimeout(resolve, 1500));
-  const state = store.snapshot({}, ipc.status());
+  const state = store.snapshot({}, ipc.status(), { includeRecords: false, includeSessions: false });
   // Diagnostics report numeric metrics only, never paths, IDs, or transcript text.
   console.log(JSON.stringify({
     health: state.health,
