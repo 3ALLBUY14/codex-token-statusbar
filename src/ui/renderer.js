@@ -9,6 +9,7 @@ let availableWidth = null;
 let availableHeight = null;
 let lastResize = '';
 let opacityPreview = null;
+let detailContext = null;
 function applyOpacity() {
   const value = opacityPreview ?? snapshot?.settings.opacity ?? 1;
   $('bar').style.setProperty('--bar-opacity', String(value));
@@ -58,17 +59,21 @@ function fitMetrics() {
   more.hidden = true;
   const omitted = [];
   while ($('bar').scrollWidth > $('bar').clientWidth + 1 || metrics.scrollWidth > metrics.clientWidth + 1 || $('bar').offsetWidth > limit + 1) {
-    const node = enabled.at(enabled.length - omitted.length - 1);
+    const node = enabled[enabled.length - omitted.length - 1];
     if (!node) break;
     node.classList.add('overflowed');
     omitted.unshift(node);
     more.hidden = false;
     more.textContent = `+${omitted.length}`;
   }
+  more.setAttribute('aria-label', `${omitted.length} 个指标已收起，请点击 C 查看明细`);
+  document.querySelector('[data-action=details]').setAttribute('aria-label', detailsOpen ? '收起用量明细' : `展开用量明细${omitted.length ? `，含 ${omitted.length} 个收起指标` : ''}`);
   const list = $('overflow-list');
   list.replaceChildren();
   const metricValues = { speed: `${$('speed').textContent} t/s`, context: $('context').textContent, session: $('session').textContent, turn: $('turn').textContent, today: $('today').textContent, cache: $('cache').textContent, tools: `${$('tools').textContent}${$('tool-failed').textContent ? ` · ${$('tool-failed').textContent}` : ''}` };
   for (const node of omitted) {
+    // Other omitted metrics already appear in the main detail summary.
+    if (!['today', 'cache'].includes(node.dataset.metric)) continue;
     const row = document.createElement('div');
     const label = document.createElement('span');
     const value = document.createElement('strong');
@@ -77,7 +82,7 @@ function fitMetrics() {
     row.append(label, value);
     list.append(row);
   }
-  list.hidden = omitted.length === 0;
+  list.hidden = list.children.length === 0;
   $('shell').style.width = detailsOpen ? `${Math.min(limit + 16, Math.max(520, $('bar').offsetWidth + 16))}px` : '';
   $('shell').style.alignItems = detailsOpen ? 'flex-end' : '';
 }
@@ -100,6 +105,10 @@ function detailVisibility(open) {
 }
 
 function render(state) {
+  if (detailContext !== state.selection.threadId) {
+    for (const item of document.querySelectorAll('.detail-extra')) item.open = false;
+    detailContext = state.selection.threadId;
+  }
   snapshot = state;
   const s = state.session;
   const settings = state.settings;
@@ -136,6 +145,7 @@ function render(state) {
   $('tools-detail').textContent = tools ? `${number(tools.total)} 次 · 失败 ${number(tools.failed)} 次 · 有耗时记录 ${number(tools.timed)} 次 / ${time(tools.durationMs)}` : '—';
   renderToolGroups($('tool-breakdown'), tools?.byType, '会话工具分类');
   const turnTools = s?.turnToolUsage;
+  $('detail-tools').hidden = !(tools?.byType?.length || turnTools?.byType?.length);
   $('turn-requests-label').textContent = s?.active ? '本轮模型请求' : '上轮模型请求';
   $('turn-tools-label').textContent = s?.active ? '本轮工具调用' : '上轮工具调用';
   $('turn-requests-detail').textContent = Number.isFinite(s?.turnRequests) ? `${number(s.turnRequests)} 次` : '—';
@@ -152,6 +162,8 @@ function render(state) {
     $(id).textContent = s?.hasUsage ? number(s.totals[field]) : '—';
   }
   $('context-detail').textContent = `${number(s?.context.used)} / ${number(s?.context.capacity)}`;
+  $('turn-total-label').textContent = s?.active ? '本轮 Token' : '上轮 Token';
+  $('turn-total-detail').textContent = number(s?.turnTokens?.total_tokens);
   $('context-origin').textContent = s?.context.overridden ? '手动窗口容量' : '最新调用';
   $('time-detail').textContent = `${time(s?.lastTurn?.durationMs)} / ${time(s?.lastTurn?.firstTokenMs)}`;
   $('speed-detail').textContent = Number.isFinite(speed) ? `≈ ${speed.toFixed(1)} tokens/s` : '—';

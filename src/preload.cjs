@@ -19,7 +19,10 @@ contextBridge.exposeInMainWorld('codexStatusbar', {
     return response.value;
   },
   settings: () => ipcRenderer.send('statusbar:open-settings'),
-  restorePosition: () => ipcRenderer.send('statusbar:restore-position'),
+  restorePosition: async () => {
+    const response = await ipcRenderer.invoke('statusbar:restore-position');
+    if (!response.ok) throw new Error(response.error.message);
+  },
   refresh: () => ipcRenderer.send('statusbar:refresh'),
   drag: (action, point) => ipcRenderer.send('statusbar:drag', action, point),
   onDragError: callback => ipcRenderer.on('statusbar:drag-error', (_, message) => callback(message)),

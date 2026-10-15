@@ -2,6 +2,7 @@
 const api = window.codexStatusbar;
 const $ = id => document.getElementById(id);
 let current, pane = 'display', chatPage = 0, chatContext = '', lastChatRender = '', resetPatch = null;
+let saveGeneration = 0, saveTimer = null, failedSave = null;
 const labels = { following: '跟随当前聊天', recent: '当前聊天未绑定，显示最近活跃聊天', pinned: '已锁定聊天', ambiguous: '多个窗口或同名聊天，请选择聊天', empty: '当前页面暂无本地聊天数据', unbound: '等待首次聊天记录' };
 function showPane(name) {
   if (!['display', 'chat', 'tools', 'diagnostics'].includes(name)) return;
@@ -9,7 +10,6 @@ function showPane(name) {
   for (const button of document.querySelectorAll('[data-tab]')) { const selected = button.dataset.tab === name; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; }
   for (const panel of document.querySelectorAll('[data-pane]')) panel.hidden = panel.dataset.pane !== name;
   api.toolInterest(name === 'tools');
-  if (name === 'tools') $('tool-details').open = true;
   window.scrollTo(0, 0);
 }
 for (const tab of document.querySelectorAll('[data-tab]')) {
@@ -75,10 +75,27 @@ api.onSnapshot(state => {
   $('diag-advice').textContent = state.health.readErrors ? '部分目录或日志暂不可读，已保留可用缓存；统计可能不完整，程序会自动重试。' : state.selection.reason === 'duplicate-title' ? '同名聊天缺少近期页面确认，请在“聊天”中锁定目标，或重新进入目标聊天。' : !state.selection.connected ? 'IPC 连接正在重试；页面路径和标题识别仍可独立工作。' : state.selection.mode === 'ambiguous' ? '多个窗口或同名聊天无法唯一识别，请在“聊天”中锁定目标。' : (!runtime.watcherHealthy || runtime.watcherError) && !runtime.testMode ? '窗口跟随助手会自动重启；“始终显示”可暂时保持浮条可见。' : !runtime.overlayVisible && !state.settings.alwaysVisible && !runtime.codexForeground ? '切回 Codex 后浮条会自动显示。' : '运行状态正常；空闲聊天的 Token 更新时间可以早于当前时间。';
   if (indexError && !state.health.readErrors) $('diag-advice').textContent = '聊天标题索引读取受限，已保留可用标题；已确认聊天可继续显示，新切换聊天需页面 ID 确认，也可手动锁定。程序会自动重试。';
 });
-async function save(patch) {
-  try { await api.setSettings(patch); $('save-status').textContent = ''; return true; }
-  catch (error) { $('save-status').textContent = error.message || '设置未能保存，请稍后重试。'; return false; }
+async function saveAction(action) {
+  const generation = ++saveGeneration;
+  clearTimeout(saveTimer); failedSave = null; $('retry-save').hidden = true;
+  $('save-feedback').dataset.state = 'saving'; $('save-status').textContent = '正在保存…';
+  try {
+    await action();
+    if (generation === saveGeneration) {
+      $('save-feedback').dataset.state = 'saved'; $('save-status').textContent = '已保存';
+      saveTimer = setTimeout(() => { $('save-feedback').dataset.state = 'idle'; $('save-status').textContent = '更改会自动保存'; }, 2500);
+    }
+    return true;
+  } catch (error) {
+    if (generation === saveGeneration) {
+      failedSave = action; $('retry-save').hidden = false;
+      $('save-feedback').dataset.state = 'error'; $('save-status').textContent = error.message || '设置未能保存，请重试。';
+    }
+    return false;
+  }
 }
+const save = patch => saveAction(() => api.setSettings(patch));
+$('retry-save').addEventListener('click', () => { if (failedSave) void saveAction(failedSave); });
 function opacityLabel() {
   const value = `${$('opacity').value}%`;
   $('opacity-value').textContent = value;
@@ -107,7 +124,7 @@ $('chat-prev').addEventListener('click', () => { chatPage--; renderChats(); });
 $('chat-next').addEventListener('click', () => { chatPage++; renderChats(); });
 $('open-tool-details').addEventListener('click', event => { event.preventDefault(); showPane('tools'); });
 $('refresh').addEventListener('click', () => api.refresh());
-$('restore-position').addEventListener('click', () => api.restorePosition());
+$('restore-position').addEventListener('click', () => { void saveAction(() => api.restorePosition()); });
 $('quit').addEventListener('click', () => api.quit());
 $('reset').addEventListener('click', async () => {
   if (!current) return;

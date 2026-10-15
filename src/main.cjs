@@ -76,6 +76,11 @@ function runtimeStatus() {
 }
 
 const validSender = event => [overlay, settingsWindow].some(win => win && !win.isDestroyed() && win.webContents === event.sender);
+function settingsFailure(error) {
+  const code = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'UNKNOWN';
+  const message = code === 'ENOSPC' ? '磁盘空间不足，设置未保存。' : ['EACCES', 'EPERM'].includes(code) ? `设置文件无法写入（${code}），请检查目录权限或安全软件拦截。` : `设置未能保存（${code}），请稍后重试。`;
+  return { ok: false, error: { code, message } };
+}
 
 function publish() {
   if (!store || quitting) return;
@@ -384,6 +389,7 @@ async function smokeCheck() {
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
   if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 19 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
+  const settingsUx = await require('./settings-ux-smoke.cjs').checkSettingsUx({ win: settingsWindow, overlay, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
     document.getElementById('open-tool-details').click();
     const list = document.getElementById('settings-tool-records');
@@ -398,7 +404,7 @@ async function smokeCheck() {
     failed.checked = false; failed.dispatchEvent(new Event('change', { bubbles: true }));
     const unknownDuration = list.innerText.includes('未记录') && list.innerText.includes('0.0s');
     scope.value = 'session'; scope.dispatchEvent(new Event('change', { bubbles: true }));
-    return { expanded: document.getElementById('tool-details').open, sessionCount, turnCount, failedCount, failedStatus, unknownDuration };
+    return { expanded: !document.getElementById('pane-tools').hidden && document.getElementById('tool-details').tagName === 'DIV', sessionCount, turnCount, failedCount, failedStatus, unknownDuration };
   })()`);
   if (!toolDetails.expanded || toolDetails.sessionCount !== 17 || toolDetails.turnCount !== 3 || toolDetails.failedCount !== 1 || !toolDetails.failedStatus || !toolDetails.unknownDuration) throw new Error('Settings tool details failed: ' + JSON.stringify(toolDetails));
   const emptyToolState = demoState();
@@ -458,7 +464,7 @@ async function smokeCheck() {
     fs.writeFileSync(path.join(artifactDirectory, 'settings-bottom-' + size.width + '.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     const toolsFit = await settingsWindow.webContents.executeJavaScript(`(() => {
       document.getElementById('tab-tools').click();
-      const details = document.getElementById('tool-details'); details.open = true;
+      const details = document.getElementById('tool-classification'); details.open = true;
       document.getElementById('tool-details-heading').scrollIntoView();
       const table = document.querySelector('.tool-table-wrap');
       const records = document.getElementById('settings-tool-records');
@@ -466,6 +472,8 @@ async function smokeCheck() {
     })()`);
     if (!toolsFit.pageFits || !toolsFit.tableFits || !toolsFit.recordsFit) throw new Error('Settings tool details overflow: ' + JSON.stringify(toolsFit));
     toolDetails[size.width] = toolsFit;
+    await settingsWindow.webContents.executeJavaScript('document.getElementById("tool-classification").open = false');
+    await new Promise(resolve => setTimeout(resolve, 150));
     fs.writeFileSync(path.join(artifactDirectory, 'settings-tools-' + size.width + '.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-diagnostics").click(); window.scrollTo(0, document.scrollingElement.scrollHeight)');
   }
@@ -477,8 +485,8 @@ async function smokeCheck() {
   const savedStatus = await settingsWindow.webContents.executeJavaScript("document.getElementById('save-status').textContent");
   const reloadedSettings = new SettingsStore(app.getPath('userData'));
   const reloadedPosition = displayPosition(reloadedSettings.value, currentDisplay(), screen.getAllDisplays());
-  if (savedStatus || currentPositionSettings().offsetX !== 40 || reloadedPosition.offsetX !== 40 || !reloadedPosition.remembered) throw new Error('Settings UI did not persist the display position: ' + savedStatus);
-  const hiddenText = await overlay.webContents.executeJavaScript(`({ labelsHidden: [...document.querySelectorAll('.statusbar .k, .statusbar .route')].every(element => getComputedStyle(element).display === 'none'), valuesVisible: document.getElementById('speed').getBoundingClientRect().width > 0 && document.getElementById('speed').textContent.includes('28.4'), buttonsVisible: document.querySelector('[data-action=details]').getBoundingClientRect().width > 0 && document.querySelector('[data-action=settings]').getBoundingClientRect().width > 0, detailsReadable: document.getElementById('details').innerText.includes('输入 Token') && document.getElementById('tools-detail').innerText.includes('17 次') })`);
+  if (savedStatus !== '已保存' || currentPositionSettings().offsetX !== 40 || reloadedPosition.offsetX !== 40 || !reloadedPosition.remembered) throw new Error('Settings UI did not persist the display position: ' + savedStatus);
+  const hiddenText = await overlay.webContents.executeJavaScript(`(() => { document.getElementById('detail-tokens').querySelector('summary').click(); const result = { labelsHidden: [...document.querySelectorAll('.statusbar .k, .statusbar .route')].every(element => getComputedStyle(element).display === 'none'), valuesVisible: document.getElementById('speed').getBoundingClientRect().width > 0 && document.getElementById('speed').textContent.includes('28.4'), buttonsVisible: document.querySelector('[data-action=details]').getBoundingClientRect().width > 0 && document.querySelector('[data-action=settings]').getBoundingClientRect().width > 0, detailsReadable: document.getElementById('details').innerText.includes('输入 Token') && document.getElementById('tools-detail').innerText.includes('17 次') }; document.getElementById('detail-tokens').querySelector('summary').click(); return result; })()`);
   if (!reloadedSettings.value.hideLabels || Object.values(hiddenText).some(value => !value)) throw new Error('Hidden text setting failed: ' + JSON.stringify(hiddenText));
   const longDetails = demoState();
   longDetails.selection.title = '验证隐藏文字及窄窗口下的长聊天标题显示，明细标题应自动换行且不会遮挡统计内容。'.repeat(3);
@@ -508,18 +516,36 @@ async function smokeCheck() {
   lastHost = { ...screen.getPrimaryDisplay().workArea, width: 350 };
   positionOverlay();
   await new Promise(resolve => setTimeout(resolve, 600));
-  const narrow = await overlay.webContents.executeJavaScript(`({ compact: document.getElementById('shell').classList.contains('compact'), hidden: document.querySelectorAll('.metric.overflowed').length, more: document.getElementById('more-count').textContent, barFits: document.getElementById('bar').scrollWidth <= document.getElementById('bar').clientWidth + 1, metricsFit: document.getElementById('metrics').scrollWidth <= document.getElementById('metrics').clientWidth + 1, detailsList: document.getElementById('overflow-list').children.length })`);
+  const narrow = await overlay.webContents.executeJavaScript(`({ compact: document.getElementById('shell').classList.contains('compact'), hidden: document.querySelectorAll('.metric.overflowed').length, extraHidden: document.querySelectorAll('.metric.overflowed[data-metric=today], .metric.overflowed[data-metric=cache]').length, more: document.getElementById('more-count').textContent, barFits: document.getElementById('bar').scrollWidth <= document.getElementById('bar').clientWidth + 1, metricsFit: document.getElementById('metrics').scrollWidth <= document.getElementById('metrics').clientWidth + 1, detailsList: document.getElementById('overflow-list').children.length, visibleMetrics: document.querySelectorAll('.metric:not([hidden]):not(.overflowed)').length })`);
+  const overflowActions = await overlay.webContents.executeJavaScript(`(async () => {
+    const button = document.querySelector('[data-action=details]'), panel = document.getElementById('details'), badge = document.getElementById('more-count');
+    if (panel.classList.contains('open')) button.click();
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    document.querySelector('.metric:not([hidden]):not(.overflowed)')?.click();
+    const metricKeptClosed = !panel.classList.contains('open'), labelDescribesHidden = button.getAttribute('aria-label').includes('收起指标');
+    badge.click(); await new Promise(resolve => requestAnimationFrame(resolve));
+    const summaryHasHiddenMetrics = [['total-detail','1,844,000'],['context-detail','114,400'],['turn-total-detail','86,420'],['speed-detail','28.4'],['tools-detail','17']].every(([id, value]) => { const node = document.getElementById(id); return node.textContent.includes(value) && node.getBoundingClientRect().height > 0; });
+    return { metricKeptClosed, cOpened: panel.classList.contains('open'), badgeBelongsToC: badge.closest('button') === button, labelDescribesHidden, summaryHasHiddenMetrics };
+  })()`);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  fs.writeFileSync(path.join(artifactDirectory, 'narrow-details.png'), (await overlay.webContents.capturePage()).toPNG());
+  if (Object.values(overflowActions).some(value => !value)) {
+    const values = await overlay.webContents.executeJavaScript(`Object.fromEntries(['total-detail','context-detail','turn-total-detail','speed-detail','tools-detail'].map(id => { const node = document.getElementById(id); return [id, { text: node.textContent, height: node.getBoundingClientRect().height }]; }))`);
+    throw new Error('Overflow hint changed C-only behavior: ' + JSON.stringify({ ...overflowActions, values }));
+  }
   settings.update(previousSettings);
   publish();
   lastHost = previousHost;
   positionOverlay();
   await new Promise(resolve => setTimeout(resolve, 300));
   const expandedAgain = await overlay.webContents.executeJavaScript("!document.getElementById('shell').classList.contains('compact') && getComputedStyle(document.querySelector('.statusbar .k')).display !== 'none'");
-  if (!narrow.compact || narrow.hidden < 1 || !narrow.barFits || !narrow.metricsFit || narrow.detailsList !== narrow.hidden || !expandedAgain) throw new Error('Window resizing did not preserve all metric access: ' + JSON.stringify(narrow));
+  if (!narrow.compact || narrow.hidden < 1 || !narrow.visibleMetrics || !narrow.barFits || !narrow.metricsFit || narrow.detailsList !== narrow.extraHidden || !expandedAgain) throw new Error('Window resizing did not preserve all metric access: ' + JSON.stringify(narrow));
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
   const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
   report.settingsFeatures = settingsFeatures;
   report.opacity = opacityCheck;
+  report.settingsUx = settingsUx;
+  report.overflowActions = overflowActions;
   fs.writeFileSync(path.join(artifactDirectory, 'smoke-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ smoke: 'passed', health: report.health, ipcConnected: report.ipcConnected, selectionMode: report.selectionMode, overflow: layout.overflow }));
   app.quit();
@@ -554,7 +580,10 @@ else {
     ipcMain.on('statusbar:drag', (event, action, point) => { if (event.sender === overlay.webContents && ['start', 'move', 'end', 'cancel'].includes(action)) dragOverlay(action, point); });
     ipcMain.on('statusbar:opacity-preview', (event, value) => { if (settingsWindow && event.sender === settingsWindow.webContents) previewOpacity(value); });
     ipcMain.on('statusbar:open-settings', event => { if (validSender(event)) openSettings(); });
-    ipcMain.on('statusbar:restore-position', event => { if (validSender(event)) restorePosition(); });
+    ipcMain.handle('statusbar:restore-position', event => {
+      if (!validSender(event)) throw new Error('Invalid sender');
+      try { restorePosition(); return { ok: true }; } catch (error) { return settingsFailure(error); }
+    });
     ipcMain.on('statusbar:refresh', event => { if (validSender(event)) { ipc.refreshBinding(); store.scan(); } });
     ipcMain.on('statusbar:tool-interest', (event, enabled) => {
       if (event.sender !== settingsWindow?.webContents) return;
@@ -596,9 +625,7 @@ else {
       try { value = updatePositionSettings(patch); }
       catch (error) {
         if (patch && Object.hasOwn(patch, 'opacity')) previewOpacity(null);
-        const code = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'UNKNOWN';
-        const message = code === 'ENOSPC' ? '磁盘空间不足，设置未保存。' : ['EACCES', 'EPERM'].includes(code) ? `设置文件无法写入（${code}），请检查目录权限或安全软件拦截。` : `设置未能保存（${code}），请稍后重试。`;
-        return { ok: false, error: { code, message } };
+        return settingsFailure(error);
       }
       publish();
       if (patch && Object.hasOwn(patch, 'opacity')) previewOpacity(null);

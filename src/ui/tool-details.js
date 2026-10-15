@@ -46,7 +46,6 @@
     text($('tool-chat'), [modes[state.selection.mode], state.selection.title ?? session?.model].filter(Boolean).join(' · '));
     text($('tool-turn-option'), session?.active ? '本轮' : '上一轮');
     const summary = stats ? `${count(stats.total)} 次 · 失败 ${count(stats.failed)} 次` : '暂无调用数据';
-    text($('tool-details-summary'), `查看分类与调用记录 · ${summary}`);
     text($('tool-stats'), stats ? `${turn ? session.active ? '本轮' : '上一轮' : '会话累计'} ${summary} · 有耗时记录 ${count(stats.timed)} 次 / ${duration(stats.durationMs)}` : '当前范围暂无已完成的工具调用。');
     const groups = $('settings-tool-groups'), groupSignature = JSON.stringify(stats?.byType);
     if (groups.dataset.signature !== groupSignature) {
@@ -62,7 +61,7 @@
     const visible = [...all].reverse().filter(record => matches(record) && (!failed || record.status === 'failed'));
     if ($('tool-sort').value === 'duration') visible.sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1));
     const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE)); page = Math.min(page, pages - 1);
-    text($('tool-record-note'), `仅筛选最近 ${all.length} / ${count(stats?.total ?? 0)} 条完成记录（最多保留 200 条），汇总包含全部调用。`);
+    text($('tool-record-note'), `最近 ${all.length} 条 / 累计 ${count(stats?.total ?? 0)} 次；筛选仅作用于最近记录（最多 200 条）。`);
     records($('settings-tool-records'), visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
     const pending = failed ? [] : running.filter(matches);
     $('running-heading').hidden = !pending.length;
