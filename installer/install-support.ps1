@@ -51,6 +51,12 @@ function Stop-Statusbar([string]$InstallRoot) {
         $children | Where-Object { $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*window-watch.ps1*' } | ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
+        $helper = Join-Path $InstallRoot 'resources\WindowHelper.exe'
+        $children | Where-Object {
+            $_.Name -eq 'WindowHelper.exe' -and [StringComparer]::OrdinalIgnoreCase.Equals($_.ExecutablePath, $helper)
+        } | ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
         Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     }
     Start-Sleep -Milliseconds 300

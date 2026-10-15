@@ -62,6 +62,8 @@ api.onSnapshot(state => {
   $('diag-title').textContent = state.selection.title ?? '尚未取得聊天标题';
   $('diag-window').textContent = runtime.testMode ? '界面测试模式' : runtime.watcherError ? runtime.watcherError : runtime.watcherRunning && !runtime.watcherLastSampleAt ? '跟随助手启动中' : runtime.watcherRunning && !runtime.watcherHealthy ? '跟随助手无响应，正在重启' : runtime.watcherRunning ? runtime.codexForeground ? '正在跟随前台 Codex' : '助手正常，Codex 不在前台或已最小化' : '跟随助手重启中';
   $('diag-window-updated').textContent = runtime.watcherLastSampleAt ? `最近响应：${new Date(runtime.watcherLastSampleAt).toLocaleTimeString('zh-CN', { hour12: false })}` : '等待首次响应';
+  $('diag-helper').textContent = runtime.testMode ? '界面测试模式' : runtime.watcherBackend === 'independent' ? '独立 Windows 助手' : runtime.watcherBackend === 'powershell' ? 'PowerShell 兼容助手' : '等待启动';
+  $('diag-title-channel').textContent = runtime.testMode ? '界面测试模式' : runtime.titleError ?? (runtime.titleHealthy ? '正常' : '正在连接；页面 ID 识别仍可用');
   $('diag-overlay').textContent = runtime.overlayVisible ? '正在显示' : runtime.manuallyHidden ? '已手动隐藏' : !state.settings.alwaysVisible && !runtime.codexForeground ? '按设置自动隐藏' : '暂未显示';
   $('diag-logs').textContent = `${state.health.fileCount} 个文件 / ${state.health.sessionCount} 个聊天${state.health.readErrors ? ' · ' + state.health.readErrors + ' 个读取错误' : ''}${state.health.indexing ? ' · 索引中' : ''}`;
   $('diag-updated').textContent = state.session?.updatedAt ? new Date(state.session.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '等待首次模型响应';

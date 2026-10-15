@@ -18,7 +18,7 @@ function diagnosticSummary(state, platform) {
   return JSON.stringify({
     version: runtime.version ?? null, platform,
     selection: { mode: s.selection?.mode, source: s.selection?.source, confidence: s.selection?.confidence, connected: Boolean(s.selection?.connected) },
-    watcher: { running: Boolean(runtime.watcherRunning), healthy: Boolean(runtime.watcherHealthy), overlayVisible: Boolean(runtime.overlayVisible) },
+    watcher: { running: Boolean(runtime.watcherRunning), healthy: Boolean(runtime.watcherHealthy), backend: runtime.watcherBackend ?? null, titleHealthy: Boolean(runtime.titleHealthy), overlayVisible: Boolean(runtime.overlayVisible) },
     logs: { fileCount: health.fileCount, sessionCount: health.sessionCount, readErrors: health.readErrors, indexing: Boolean(health.indexing), truncated: Boolean(health.truncated) },
     tokensUpdatedAt: s.session?.updatedAt ?? null,
     tools: { completed: s.session?.toolUsage?.total ?? 0, failed: s.session?.toolUsage?.failed ?? 0 },

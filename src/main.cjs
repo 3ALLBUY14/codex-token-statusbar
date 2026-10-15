@@ -3,7 +3,7 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, nativeTheme, screen, session, clipboard, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { WindowWatcher } = require('./window-watcher.cjs');
 const { SessionStore } = require('./session-store.cjs');
 const { CodexIpc } = require('./codex-ipc.cjs');
 const { DesktopNavigation } = require('./desktop-navigation.cjs');
@@ -28,12 +28,10 @@ let overlayLoaded = false;
 let manuallyHidden = false;
 let hostVisible = false;
 let ownForeground = false;
-let geometryTimer;
 let previewFixture = false;
 let fixtureOverride = null;
 let compactLayout = null;
 let dragSession = null;
-let watcherStartedAt = 0;
 let watcherLastSampleAt = 0;
 let watcherError = null;
 let watcherWatchdog;
@@ -50,11 +48,15 @@ function updateActivity() {
 }
 
 function runtimeStatus() {
-  const watcherRunning = Boolean(nativeWatcher?.pid && !nativeWatcher.killed);
+  const watcherState = nativeWatcher?.status();
+  const watcherRunning = watcherState?.geometryRunning ?? false;
   return {
     version: displayVersion,
     watcherRunning,
-    watcherHealthy: watcherRunning && watcherLastSampleAt > 0 && Date.now() - watcherLastSampleAt < 7000,
+    watcherHealthy: watcherState?.geometryHealthy ?? false,
+    watcherBackend: watcherState?.backend ?? null,
+    titleHealthy: watcherState?.titleHealthy ?? false,
+    titleError: watcherState?.titleError ?? null,
     watcherLastSampleAt: watcherLastSampleAt || null,
     watcherError,
     codexForeground: hostVisible,
@@ -92,6 +94,7 @@ function publish() {
         selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false,
         pinned: Boolean(settings.value.pinnedThreadId),
         watcherRunning: latest.runtime.watcherRunning, watcherHealthy: latest.runtime.watcherHealthy,
+        watcherBackend: latest.runtime.watcherBackend, titleHealthy: latest.runtime.titleHealthy,
         toolsTotal: latest.session?.toolUsage?.total ?? 0, toolsRecords: latest.session?.toolUsage?.records?.length ?? 0,
       }, null, 2));
     } catch { /* Optional diagnostics must not interrupt the overlay. */ }
@@ -212,28 +215,17 @@ function restorePosition() {
 function watchWindows() {
   if (process.platform !== 'win32' || smoke || demo) return;
   const script = app.isPackaged ? path.join(process.resourcesPath, 'window-watch.ps1') : path.join(__dirname, '..', 'scripts', 'window-watch.ps1');
-  const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  nativeWatcher = spawn(executable, ['-MTA', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-OverlayProcessId', String(process.pid)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  const watcher = nativeWatcher;
-  watcherStartedAt = Date.now();
+  const executable = app.isPackaged ? path.join(process.resourcesPath, 'WindowHelper.exe') : path.join(__dirname, '..', 'artifacts', 'native-helper', 'WindowHelper.exe');
+  const watcher = nativeWatcher = new WindowWatcher({ executable, script });
   watcherLastSampleAt = 0;
-  let pending = '';
-  watcher.stdout.setEncoding('utf8');
-  watcher.stdout.on('data', data => {
-    pending += data;
-    const lines = pending.split('\n');
-    pending = lines.pop();
-    if (pending.length > 16384) pending = '';
-    for (const line of lines) {
-      let sample;
-      try { sample = JSON.parse(line); } catch { continue; }
+  watcher.on('sample', sample => {
       watcherLastSampleAt = Date.now();
       watcherError = null;
       navigation?.setHost(sample.processId, sample.windowCount);
-      if (sample.visible) visibleChat?.observe(sample.documentTitle, sample.processId, sample.handle);
+      if (sample.visible && watcher.status().backend === 'powershell') visibleChat?.observe(sample.documentTitle, sample.processId, sample.handle);
       queuePublish();
       ownForeground = sample.ownForeground === true;
-      if (ownForeground) { positionOverlay(); continue; }
+      if (ownForeground) { positionOverlay(); return; }
       const previousHostVisible = hostVisible;
       hostVisible = sample.visible === true;
       if (hostVisible && [sample.x, sample.y, sample.width, sample.height].every(Number.isFinite)) {
@@ -242,28 +234,21 @@ function watchWindows() {
       }
       positionOverlay();
       if (hostVisible !== previousHostVisible) queuePublish();
-    }
   });
-  watcher.stderr.on('data', () => { watcherError = '窗口跟随助手报告错误'; queuePublish(); });
-  watcher.on('error', error => { watcherError = `窗口跟随助手启动失败（${/^[A-Z0-9_]+$/.test(error.code ?? '') ? error.code : 'UNKNOWN'}）`; queuePublish(); });
-  watcher.on('close', () => {
-    if (nativeWatcher !== watcher) return;
-    nativeWatcher = null;
+  watcher.on('title', sample => { visibleChat?.observe(sample.documentTitle, sample.processId, sample.handle); queuePublish(); });
+  watcher.on('status', () => { watcherError = watcher.status().error; queuePublish(); });
+  watcher.on('reset', () => {
     ownForeground = false;
     visibleChat?.observe(null, 0, 0);
     hostVisible = false;
     positionOverlay();
     queuePublish();
-    if (!quitting) geometryTimer = setTimeout(watchWindows, 2000);
   });
+  watcher.start();
 }
 
 function checkWatcher() {
-  if (!nativeWatcher || quitting) return;
-  if (Date.now() - (watcherLastSampleAt || watcherStartedAt) < 7000) return;
-  watcherError = '窗口跟随助手超过 7 秒无响应，正在重启';
-  nativeWatcher.kill();
-  queuePublish();
+  if (!quitting) nativeWatcher?.check();
 }
 
 function createOverlay() {
@@ -619,12 +604,11 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   quitting = true;
   clearTimeout(publishTimer);
-  clearTimeout(geometryTimer);
   clearInterval(watcherWatchdog);
   ipc?.stop();
   navigation?.stop();
   visibleChat?.stop();
   store?.stop();
-  nativeWatcher?.kill();
+  nativeWatcher?.stop();
   tray?.destroy();
 });

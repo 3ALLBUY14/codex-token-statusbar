@@ -1,4 +1,4 @@
-# Codex Token 状态条 V1.2（Windows）
+# Codex Token 状态条 V1.3（Windows）
 
 为 Codex 桌面版提供一个跟随窗口的独立浮条。基于
 [zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar)
@@ -15,12 +15,12 @@
 
 ## 开始使用
 
-从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.2-Windows-x64.zip`。
+从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.3-Windows-x64.zip`。
 
 安装版：解压整个压缩包，双击 **`安装.cmd`**，选择是否开机启动和创建桌面入口，再点击“安装并启动”。安装到当前用户目录，无需管理员权限。可在 Windows“设置 → 应用”中卸载。
 
 便携版：双击安装包 `app` 目录中的 **`CodexTokenStatusbar.exe`**。
-无需安装 Node.js、Python 或 .NET。
+无需额外安装 Node.js 或 Python；窗口助手使用 Windows 自带的 .NET Framework 4.x。
 
 1. 打开 Codex 桌面版，进入一个有模型响应记录的聊天。
 2. 浮条默认出现在窗口右上方；切换到其他应用时自动隐藏。
@@ -104,13 +104,14 @@
 
 目录或日志暂不可读时保留已缓存统计、显示异常并标记今日统计暂不完整；确认文件删除后才移除对应数据。日志变化优先刷新相关文件，定期补扫；隐藏或后台时降低轮询频率，工具记录仅在设置需要时传送。
 
-Windows 窗口跟随通过随包的 PowerShell / Win32 小助手实现，不弹控制台窗口。
-受企业策略限制无法运行 PowerShell 时，窗口跟随可能不可用；可以在设置中启用
-“切换到其他应用时仍显示”作为固定桌面浮条。
+Windows 窗口跟随默认通过随包的独立 Windows 助手实现，不弹控制台窗口。窗口坐标和标题识别分属两个进程；标题读取超时只重启标题通道，窗口跟随和页面 ID 识别继续工作。诊断栏分别显示助手类型、窗口心跳和标题通道状态。
+独立助手缺失或连续三次启动失败时自动使用 PowerShell 兼容助手。若企业策略同时限制两种助手，可在设置中启用“切换到其他应用时仍显示”作为固定桌面浮条。
+
+分享包只保留 Chromium 的简体中文与英文语言资源，保留 Electron、Chromium 等组件的授权文件。助手启动对比和包体精简的测量方法见 [性能验证](docs/PERFORMANCE.md)。
 
 ## 从源码运行
 
-要求 Node.js 22.12+，首次安装需要联网下载依赖和 Electron。
+要求 Windows x64、Node.js 22.12+ 以及 Windows 自带的 .NET Framework 4.x 编译器，首次安装需要联网下载依赖和 Electron。`npm start` 和打包前会编译窗口助手；编译产物仅写入 `artifacts/`，不提交仓库。
 
 ```powershell
 npm ci
@@ -122,6 +123,8 @@ npm start
 ```powershell
 npm test
 npm run diagnose
+npm run verify:helper
+npm run benchmark:helper
 ```
 
 `diagnose` 仅输出数值、绑定状态与读取健康信息，不输出聊天内容、ID 或用户路径。

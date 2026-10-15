@@ -8,6 +8,8 @@ npm test
 npm start
 ```
 
+`npm start` 与 `npm run package` 会使用 Windows 自带的 .NET Framework 4.x x64 编译器编译 `native/`，产物位于忽略的 `artifacts/native-helper/`。无需额外下载 SDK；源文件未变化时复用缓存。可运行 `npm run build:helper` 单独构建、`npm run verify:helper` 验证真实助手进程、`npm run benchmark:helper` 对比两种助手的首次响应。测量限制见 `docs/PERFORMANCE.md`。不要提交编译后的助手。
+
 修改界面后运行模拟数据检查：
 
 ```powershell
