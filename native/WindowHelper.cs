@@ -11,6 +11,7 @@ internal static class WindowHelper {
     private static readonly object TargetLock = new object();
     private static long targetHandle;
     private static int targetPid;
+    private static bool trackComposer;
     private static int ownerPid;
     private static StreamWriter output;
     private static bool ParentAlive() { return ownerPid == 0 || CodexStatusbarWindows.IsProcessRunning(ownerPid); }
@@ -32,7 +33,8 @@ internal static class WindowHelper {
         });
         parentMonitor.IsBackground = true; parentMonitor.Start();
         try {
-            if (Array.IndexOf(args, "--title") >= 0) RunTitles();
+            if (once && Number(args, "--layer-handle") != 0) Write(CodexStatusbarWindows.InspectOverlay(Number(args, "--layer-handle"), Number(args, "--above-handle")));
+            else if (Array.IndexOf(args, "--title") >= 0) RunTitles();
             else RunGeometry(once, Number(args, "--probe-handle"));
             return 0;
         } catch { return 1; }
@@ -56,7 +58,8 @@ internal static class WindowHelper {
                     try {
                         var input = parser.Deserialize<Dictionary<string, object>>(line);
                         long handle = Convert.ToInt64(input["handle"]); int pid = Convert.ToInt32(input["processId"]);
-                        lock (TargetLock) { targetHandle = Math.Max(0, handle); targetPid = Math.Max(0, pid); }
+                        bool composer = input.ContainsKey("composer") && input["composer"] is bool && (bool)input["composer"];
+                        lock (TargetLock) { targetHandle = Math.Max(0, handle); targetPid = Math.Max(0, pid); trackComposer = composer; }
                     } catch { }
                 }
             } catch { }
@@ -66,9 +69,10 @@ internal static class WindowHelper {
         var serializer = new JavaScriptSerializer();
         string previous = null; DateTime lastOutput = DateTime.MinValue;
         while (ParentAlive()) {
-            long handle; int pid;
-            lock (TargetLock) { handle = targetHandle; pid = targetPid; }
+            long handle; int pid; bool composerEnabled;
+            lock (TargetLock) { handle = targetHandle; pid = targetPid; composerEnabled = trackComposer; }
             string title = null; bool unavailable = false;
+            object composer = null;
             if (handle != 0 && pid != 0) {
                 try {
                     uint actualPid; CodexStatusbarWindows.GetWindowThreadProcessId(new IntPtr(handle), out actualPid);
@@ -78,13 +82,37 @@ internal static class WindowHelper {
                     var document = element.FindFirst(TreeScope.Descendants, condition);
                     if (document != null) title = document.Current.Name;
                     if (title != null && title.Length > 2048) title = null;
+                    if (composerEnabled) { try { composer = ReadComposer(element); } catch { composer = null; } }
                 } catch { unavailable = true; }
             }
-            lock (TargetLock) { if (handle != targetHandle || pid != targetPid) continue; }
-            string sample = serializer.Serialize(new { handle = handle, processId = pid, documentTitle = title, idle = handle == 0, unavailable = unavailable });
+            lock (TargetLock) { if (handle != targetHandle || pid != targetPid || composerEnabled != trackComposer) continue; }
+            string sample = serializer.Serialize(new { handle = handle, processId = pid, documentTitle = title, idle = handle == 0, unavailable = unavailable, composer = composer });
             DateTime now = DateTime.UtcNow;
             if (sample != previous || (now - lastOutput).TotalSeconds >= 2) { Write(sample); previous = sample; lastOutput = now; }
             Thread.Sleep(handle == 0 ? 1000 : 750);
         }
+    }
+    // Only control classes and bounds are inspected. Never read input Value/Name.
+    private static object ReadComposer(AutomationElement root) {
+        var edits = root.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+        object result = null; int matches = 0;
+        for (int i = 0; i < Math.Min(edits.Count, 64); i++) {
+            var edit = edits[i]; var current = edit.Current;
+            if (current.IsOffscreen || !current.IsKeyboardFocusable || !(" " + current.ClassName + " ").Contains(" ProseMirror ")) continue;
+            var rect = current.BoundingRectangle;
+            var parent = TreeWalker.ControlViewWalker.GetParent(edit);
+            if (parent == null) continue;
+            var candidate = parent.Current.BoundingRectangle;
+            bool threadComposer = false;
+            for (int depth = 0; depth < 6 && parent != null; depth++, parent = TreeWalker.ControlViewWalker.GetParent(parent)) {
+                if ((parent.Current.ClassName ?? "").Contains("thread-scroll-container")) { threadComposer = true; break; }
+            }
+            // Chromium may expose an editor's unclipped bounds beyond its container.
+            // The composer container includes the toolbar and is the exclusion area.
+            if (!threadComposer || candidate.IsEmpty || candidate.Width < 200 || candidate.Height < 20 || rect.IsEmpty || !candidate.IntersectsWith(rect)) continue;
+            matches++;
+            result = new { x = candidate.X, y = candidate.Y, width = candidate.Width, height = candidate.Height };
+        }
+        return matches == 1 ? result : null;
     }
 }

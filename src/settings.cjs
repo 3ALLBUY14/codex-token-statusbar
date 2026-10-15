@@ -9,13 +9,13 @@ const DEFAULTS = Object.freeze({
   showSpeed: true, showContext: true, showSession: true, showTurn: false,
   showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null,
   offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false,
-  rememberDisplayPositions: true, displayPositions: [],
+  rememberDisplayPositions: true, displayPositions: [], desktopCompatibility: true, dockToComposer: false,
 });
 
 function cleanSettings(input, previous = DEFAULTS) {
   const result = { ...previous };
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools', 'alwaysVisible', 'allowDrag', 'hideLabels', 'rememberDisplayPositions']) {
+  for (const key of ['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools', 'alwaysVisible', 'allowDrag', 'hideLabels', 'rememberDisplayPositions', 'desktopCompatibility', 'dockToComposer']) {
     if (typeof input[key] === 'boolean') result[key] = input[key];
   }
   if (['system', 'dark', 'light'].includes(input.theme)) result.theme = input.theme;

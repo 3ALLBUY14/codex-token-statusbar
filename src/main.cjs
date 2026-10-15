@@ -12,6 +12,9 @@ const { SettingsStore } = require('./settings.cjs');
 const { contextStatus } = require('./metrics.cjs');
 const { anchorPosition, displayPosition, positionPatch, clampBounds } = require('./display-position.cjs');
 const { diagnosticSummary, newerVersion, versionParts, RELEASE_URL, UPDATE_URL } = require('./diagnostics.cjs');
+const { OverlayLayer } = require('./overlay-layer.cjs');
+const { composerPosition } = require('./composer-position.cjs');
+const overlayLayer = new OverlayLayer();
 
 app.setName('Codex Token Statusbar');
 const displayVersion = require('../package.json').displayVersion ?? app.getVersion();
@@ -40,6 +43,7 @@ let settingsWantsTools = false;
 let catalogCache = null;
 let catalogSignature = '';
 let updateRequest = null;
+let composerSample = null, hostHandle = 0, dockStatus = 'off';
 function previewOpacity(value) {
   const opacity = Number.isFinite(value) ? Math.max(0.2, Math.min(1, value)) : null;
   if (overlay && !overlay.isDestroyed()) overlay.webContents.send('statusbar:opacity-preview', opacity);
@@ -71,6 +75,9 @@ function runtimeStatus() {
     codexForeground: hostVisible,
     overlayVisible: Boolean(overlay && !overlay.isDestroyed() && overlay.isVisible()),
     manuallyHidden,
+    desktopCompatibility: settings.value.desktopCompatibility,
+    overlayTopmost: Boolean(overlay && !overlay.isDestroyed() && overlay.isAlwaysOnTop()),
+    composerDock: dockStatus,
     testMode: smoke || demo,
   };
 }
@@ -111,6 +118,7 @@ function publish() {
         watcherBackend: latest.runtime.watcherBackend, titleHealthy: latest.runtime.titleHealthy,
         indexError: latest.runtime.indexError, cacheHits: latest.health.cacheHits, cacheError: latest.health.cacheError,
         displayCount: latest.runtime.displayCount, displayScale: latest.runtime.displayScale,
+        overlayVisible: latest.runtime.overlayVisible, overlayTopmost: latest.runtime.overlayTopmost, composerDock: latest.runtime.composerDock,
         toolsTotal: latest.session?.toolUsage?.total ?? 0, toolsRecords: latest.session?.toolUsage?.records?.length ?? 0,
       }, null, 2));
     } catch { /* Optional diagnostics must not interrupt the overlay. */ }
@@ -143,7 +151,7 @@ function queuePublish() {
 function currentDisplay() { return lastHost ? screen.getDisplayMatching(lastHost) : screen.getPrimaryDisplay(); }
 function currentPositionSettings() {
   const position = displayPosition(settings.value, currentDisplay(), screen.getAllDisplays());
-  return { placement: position.placement, offsetX: position.offsetX, offsetY: position.offsetY };
+  return { placement: settings.value.dockToComposer ? 'bottom-center' : position.placement, offsetX: position.offsetX, offsetY: position.offsetY };
 }
 function updatePositionSettings(patch) {
   if (!patch || typeof patch !== 'object') return settings.value;
@@ -158,7 +166,7 @@ function updatePositionSettings(patch) {
 
 function dragOverlay(action, point) {
   if (action === 'start') {
-    if (!settings.value.allowDrag || !overlay.isVisible()) return;
+    if (!settings.value.allowDrag || settings.value.dockToComposer || !overlay.isVisible()) return;
     const cursor = point && Number.isFinite(point.x) && Number.isFinite(point.y) && Math.abs(point.x) < 100000 && Math.abs(point.y) < 100000 ? point : screen.getCursorScreenPoint();
     dragSession = { cursor, bounds: overlay.getBounds(), moved: false };
     return;
@@ -190,22 +198,33 @@ function positionOverlay() {
   updateActivity();
   if (!overlay || overlay.isDestroyed() || !overlayLoaded) return;
   const value = settings.value;
+  nativeWatcher?.setComposerTracking(value.dockToComposer);
   const host = currentDisplay(), position = displayPosition(value, host, screen.getAllDisplays());
   const display = position.display;
   const bounds = display.id === host.id ? lastHost || host.workArea : display.workArea;
   let work = display.workArea;
-  const availableWidth = Math.min(Math.max(280, bounds.width - 24), work.width);
+  const composer = value.dockToComposer && hostVisible && composerSample && Date.now() - composerSample.at < 3500 && composerSample.handle === hostHandle && lastHost && composerSample.host.width === lastHost.width && composerSample.host.height === lastHost.height ? {
+    ...composerSample.rect, x: composerSample.rect.x + lastHost.x - composerSample.host.x, y: composerSample.rect.y + lastHost.y - composerSample.host.y,
+  } : null;
+  const dockHost = lastHost && { x: Math.max(lastHost.x, host.workArea.x), y: Math.max(lastHost.y, host.workArea.y), width: Math.min(lastHost.x + lastHost.width, host.workArea.x + host.workArea.width) - Math.max(lastHost.x, host.workArea.x), height: Math.min(lastHost.y + lastHost.height, host.workArea.y + host.workArea.height) - Math.max(lastHost.y, host.workArea.y) };
+  const availableWidth = Math.min(Math.max(200, composer?.width ?? bounds.width - 24), work.width);
   let width = Math.min(overlaySize.width, availableWidth);
   const compact = availableWidth / value.scale < 470;
-  if (compactLayout?.compact !== compact || compactLayout?.availableWidth !== availableWidth || compactLayout?.availableHeight !== work.height) {
-    compactLayout = { compact, availableWidth, availableHeight: work.height };
+  const barHeight = overlaySize.barHeight ?? Math.ceil(52 * value.scale);
+  const dock = composer && composerPosition(dockHost, composer, { width, height: Math.min(overlaySize.height, work.height) }, barHeight);
+  const availableHeight = dock ? dock.y + dock.height - dockHost.y : work.height;
+  if (compactLayout?.compact !== compact || compactLayout?.availableWidth !== availableWidth || compactLayout?.availableHeight !== availableHeight) {
+    compactLayout = { compact, availableWidth, availableHeight };
     overlay.webContents.send('statusbar:compact', compactLayout);
   }
   let height = Math.min(overlaySize.height, work.height);
   const anchor = anchorPosition(bounds, { width, height }, position.placement);
   let x = anchor.x + position.offsetX;
   let y = anchor.y + position.offsetY;
-  if (dragSession?.moved) {
+  const previousDockStatus = dockStatus;
+  dockStatus = !value.dockToComposer ? 'off' : !hostVisible ? 'host-hidden' : dock ? dock.edge : 'waiting';
+  if (dock) { ({ x, y, width, height } = dock); work = host.workArea; }
+  else if (dragSession?.moved && !value.dockToComposer) {
     const cursor = screen.getCursorScreenPoint();
     work = screen.getDisplayNearestPoint(cursor).workArea;
     width = Math.min(dragSession.bounds.width, work.width);
@@ -218,19 +237,24 @@ function positionOverlay() {
   const next = clampBounds({ x, y, width, height }, work);
   const current = overlay.getBounds();
   if (Object.keys(next).some(key => next[key] !== current[key])) overlay.setBounds(next);
-  const visible = !manuallyHidden && (smoke || demo || value.alwaysVisible || hostVisible || Boolean(ownForeground && settingsWindow?.isFocused()));
+  const visible = !manuallyHidden && (value.dockToComposer ? Boolean(dock && (hostVisible || ownForeground)) : smoke || demo || value.alwaysVisible || hostVisible || Boolean(ownForeground && settingsWindow?.isFocused()));
   const currentVisible = overlay.isVisible();
   if (visible && !currentVisible) overlay.showInactive();
+  if (visible) maintainOverlayLayer(!currentVisible);
   if (!visible && currentVisible) {
     dragSession = null;
     overlay.hide();
     overlay.webContents.send('statusbar:collapse');
   }
-  if (visible !== currentVisible) queuePublish();
+  if (visible !== currentVisible || previousDockStatus !== dockStatus) queuePublish();
+}
+
+function maintainOverlayLayer(force = false) {
+  overlayLayer.maintain(overlay, { enabled: settings.value.desktopCompatibility, suspended: Boolean(settingsWindow?.isFocused()), force });
 }
 
 function restorePosition() {
-  settings.update({ placement: 'top-right', offsetX: 0, offsetY: 0, displayPositions: [] });
+  settings.update({ placement: 'top-right', offsetX: 0, offsetY: 0, displayPositions: [], dockToComposer: false });
   manuallyHidden = false;
   publish();
   positionOverlay();
@@ -253,6 +277,9 @@ function watchWindows() {
       if (ownForeground) { positionOverlay(); return; }
       const previousHostVisible = hostVisible;
       hostVisible = sample.visible === true;
+      if (hostVisible && sample.handle !== hostHandle) composerSample = null;
+      if (hostVisible) hostHandle = sample.handle;
+      else composerSample = null;
       if (hostVisible && [sample.x, sample.y, sample.width, sample.height].every(Number.isFinite)) {
         const physical = { x: sample.x, y: sample.y, width: sample.width, height: sample.height };
         lastHost = screen.screenToDipRect(null, physical);
@@ -260,12 +287,18 @@ function watchWindows() {
       positionOverlay();
       if (hostVisible !== previousHostVisible) queuePublish();
   });
+  watcher.on('composer', sample => {
+    if (!hostVisible || sample.handle !== hostHandle) return;
+    composerSample = sample.rect && lastHost ? { handle: sample.handle, rect: screen.screenToDipRect(null, sample.rect), host: { ...lastHost }, at: Date.now() } : null;
+    positionOverlay();
+  });
   watcher.on('title', sample => { visibleChat?.observe(sample.documentTitle, sample.processId, sample.handle); queuePublish(); });
   watcher.on('status', () => { watcherError = watcher.status().error; queuePublish(); });
   watcher.on('reset', () => {
     ownForeground = false;
     visibleChat?.observe(null, 0, 0);
     hostVisible = false;
+    composerSample = null; hostHandle = 0;
     positionOverlay();
     queuePublish();
   });
@@ -273,7 +306,7 @@ function watchWindows() {
 }
 
 function checkWatcher() {
-  if (!quitting) nativeWatcher?.check();
+  if (!quitting) { nativeWatcher?.check(); positionOverlay(); }
 }
 
 function createOverlay() {
@@ -285,6 +318,7 @@ function createOverlay() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: !smoke },
   });
   overlay.setIgnoreMouseEvents(false);
+  overlay.setAlwaysOnTop(true, settings.value.desktopCompatibility ? 'pop-up-menu' : 'floating');
   overlay.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   overlay.webContents.on('will-navigate', event => event.preventDefault());
   overlay.webContents.once('did-finish-load', () => { overlayLoaded = true; publish(); positionOverlay(); });
@@ -387,7 +421,7 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 19 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 21 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
   const settingsUx = await require('./settings-ux-smoke.cjs').checkSettingsUx({ win: settingsWindow, overlay, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
@@ -540,15 +574,45 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 300));
   const expandedAgain = await overlay.webContents.executeJavaScript("!document.getElementById('shell').classList.contains('compact') && getComputedStyle(document.querySelector('.statusbar .k')).display !== 'none'");
   if (!narrow.compact || narrow.hidden < 1 || !narrow.visibleMetrics || !narrow.barFits || !narrow.metricsFit || narrow.detailsList !== narrow.extraHidden || !expandedAgain) throw new Error('Window resizing did not preserve all metric access: ' + JSON.stringify(narrow));
+  const docking = await smokeDocking();
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
   const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
   report.settingsFeatures = settingsFeatures;
   report.opacity = opacityCheck;
   report.settingsUx = settingsUx;
   report.overflowActions = overflowActions;
+  report.composerDocking = docking;
   fs.writeFileSync(path.join(artifactDirectory, 'smoke-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ smoke: 'passed', health: report.health, ipcConnected: report.ipcConnected, selectionMode: report.selectionMode, overflow: layout.overflow }));
   app.quit();
+}
+
+async function smokeDocking() {
+  const saved = { value: settings.value, lastHost, hostVisible, hostHandle, composerSample, overlaySize, manuallyHidden };
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  try {
+    const work = screen.getPrimaryDisplay().workArea;
+    lastHost = { x: work.x, y: work.y, width: Math.min(950, work.width), height: Math.min(740, work.height) };
+    hostVisible = true; hostHandle = 123; manuallyHidden = false;
+    composerSample = { handle: 123, at: Date.now(), host: { ...lastHost }, rect: { x: lastHost.x + 30, y: lastHost.y + lastHost.height - 120, width: lastHost.width - 60, height: 105 } };
+    settings.update({ dockToComposer: true, scale: 1, alwaysVisible: true }); publish(); positionOverlay(); await wait(500);
+    const initial = overlay.getBounds();
+    if (!overlay.isVisible() || dockStatus !== 'above' || initial.y + initial.height > composerSample.rect.y) throw new Error('Composer docking overlapped input');
+    const controls = await settingsWindow.webContents.executeJavaScript("document.querySelector('[data-setting=dockToComposer]').checked && ['placement','allowDrag','offsetX','offsetY','alwaysVisible'].every(k => document.querySelector('[data-setting='+k+']').disabled)");
+    if (!controls) throw new Error('Composer controls did not reflect docking mode');
+    composerSample.at = Date.now() - 4000; positionOverlay();
+    if (overlay.isVisible()) throw new Error('Stale composer kept an overlay visible');
+    composerSample.at = Date.now(); positionOverlay();
+    if (!overlay.isVisible()) throw new Error('Fresh composer did not recover');
+    hostVisible = false; positionOverlay();
+    if (overlay.isVisible()) throw new Error('Docked bar leaked over another application');
+    hostVisible = true; composerSample = null; positionOverlay();
+    if (overlay.isVisible()) throw new Error('Missing composer reused previous position');
+    return { avoidsInput: true, controls: true, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
+  } finally {
+    settings.update(saved.value); ({ lastHost, hostVisible, hostHandle, composerSample, overlaySize, manuallyHidden } = saved);
+    publish(); positionOverlay();
+  }
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -574,7 +638,7 @@ else {
     ipcMain.on('statusbar:ready', event => { if (validSender(event)) { if (demo) event.sender.send('statusbar:snapshot', demoState()); else publish(); } });
     ipcMain.on('statusbar:resize', (event, size) => {
       if (event.sender !== overlay.webContents || !Number.isFinite(size?.width) || !Number.isFinite(size?.height)) return;
-      overlaySize = { width: Math.max(260, Math.min(1400, Math.ceil(size.width))), height: Math.max(48, Math.min(1600, Math.ceil(size.height))) };
+      overlaySize = { width: Math.max(260, Math.min(1400, Math.ceil(size.width))), height: Math.max(48, Math.min(1600, Math.ceil(size.height))), barHeight: Number.isFinite(size.barHeight) ? Math.max(20, Math.min(160, Math.ceil(size.barHeight))) : overlaySize.barHeight };
       positionOverlay();
     });
     ipcMain.on('statusbar:drag', (event, action, point) => { if (event.sender === overlay.webContents && ['start', 'move', 'end', 'cancel'].includes(action)) dragOverlay(action, point); });
@@ -649,7 +713,7 @@ else {
     await store.start();
     publish();
     watchWindows();
-    if (!smoke && !demo) watcherWatchdog = setInterval(checkWatcher, 2000);
+    if (!smoke && !demo) watcherWatchdog = setInterval(checkWatcher, 1000);
     if (demo) overlay.webContents.once('did-finish-load', () => overlay.webContents.send('statusbar:snapshot', demoState()));
     if (smoke) smokeCheck().catch(error => { console.error(error.stack ?? error.message); app.exit(1); });
   }).catch(error => { console.error(error.stack ?? error.message); app.exit(1); });

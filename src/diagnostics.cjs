@@ -21,6 +21,7 @@ function diagnosticSummary(state, platform) {
     watcher: { running: Boolean(runtime.watcherRunning), healthy: Boolean(runtime.watcherHealthy), backend: runtime.watcherBackend ?? null, titleHealthy: Boolean(runtime.titleHealthy), overlayVisible: Boolean(runtime.overlayVisible) },
     logs: { fileCount: health.fileCount, sessionCount: health.sessionCount, readErrors: health.readErrors, indexing: Boolean(health.indexing), truncated: Boolean(health.truncated), indexError: runtime.indexError ?? null, cacheHits: health.cacheHits ?? 0, cacheError: health.cacheError ?? null },
     displays: { count: runtime.displayCount ?? null, scale: runtime.displayScale ?? null },
+    overlay: { desktopCompatibility: Boolean(runtime.desktopCompatibility), topmost: Boolean(runtime.overlayTopmost), composerDock: runtime.composerDock ?? 'off' },
     tokensUpdatedAt: s.session?.updatedAt ?? null,
     tools: { completed: s.session?.toolUsage?.total ?? 0, failed: s.session?.toolUsage?.failed ?? 0 },
   }, null, 2);

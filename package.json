@@ -1,13 +1,18 @@
 {
   "name": "codex-token-statusbar",
-  "version": "1.6.0",
-  "displayVersion": "V1.6",
+  "version": "1.7.0",
+  "displayVersion": "V1.7",
   "private": true,
   "description": "Local, read-only Codex Desktop token and context status bar, adapted from zcode-token-usage-statusbar.",
   "main": "src/main.cjs",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/3ALLBUY14/codex-token-statusbar.git" },
-  "bugs": { "url": "https://github.com/3ALLBUY14/codex-token-statusbar/issues" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/3ALLBUY14/codex-token-statusbar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/3ALLBUY14/codex-token-statusbar/issues"
+  },
   "homepage": "https://github.com/3ALLBUY14/codex-token-statusbar#readme",
   "scripts": {
     "prestart": "node scripts/build-helper.cjs",

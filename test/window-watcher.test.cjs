@@ -50,3 +50,14 @@ test('missing helper uses compatibility mode and invalid geometry is ignored', t
   assert.equal(validGeometry({ ...geometry, processId: '10' }), false);
   assert.equal(validGeometry(geometry), true);
 });
+
+test('composer tracking only accepts the current HWND and valid rectangles while enabled', t => {
+  const { watcher, children } = harness(t), received = [];
+  watcher.on('composer', value => received.push(value)); watcher.start(); write(children[0], geometry);
+  const sample = { handle: 20, processId: 10, idle: false, documentTitle: null, composer: { x: 1, y: 2, width: 500, height: 120 } };
+  write(children[1], sample); assert.equal(received.length, 0);
+  watcher.setComposerTracking(true); write(children[1], sample); assert.equal(received.at(-1).rect.width, 500);
+  write(children[1], { ...sample, handle: 21 }); assert.equal(received.length, 1);
+  write(children[1], { ...sample, composer: { ...sample.composer, width: Infinity } }); assert.equal(received.at(-1).rect, null);
+  write(children[0], { ...geometry, handle: 22 }); write(children[1], sample); assert.equal(received.length, 2);
+});

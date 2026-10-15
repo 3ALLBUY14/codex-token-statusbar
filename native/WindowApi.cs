@@ -23,6 +23,21 @@ public static class CodexStatusbarWindows {
         try { using (var process = Process.GetProcessById(pid)) { return !process.HasExited; } }
         catch { return false; }
     }
+    public static string InspectOverlay(long handle, long competitor) {
+        var window = new IntPtr(handle);
+        bool competitorAbove = false, desktopAbove = false;
+        IntPtr above = GetWindow(window, 3);
+        for (int i = 0; above != IntPtr.Zero && i < 1024; i++, above = GetWindow(above, 3)) {
+            if (above.ToInt64() == competitor) competitorAbove = true;
+            uint pid; GetWindowThreadProcessId(above, out pid);
+            try { using (var process = Process.GetProcessById((int)pid)) {
+                if (IsWindowVisible(above) && process.ProcessName.Equals("seelen-ui", StringComparison.OrdinalIgnoreCase)) desktopAbove = true;
+            } } catch { }
+        }
+        return "{\"topmost\":" + ((GetWindowLongPtr(window, -20).ToInt64() & 8) != 0 ? "true" : "false") +
+            ",\"competitorAbove\":" + (competitorAbove ? "true" : "false") + ",\"desktopAbove\":" + (desktopAbove ? "true" : "false") +
+            ",\"foreground\":" + GetForegroundWindow().ToInt64() + "}";
+    }
     public static bool IsCodexProcess(uint pid) {
         try {
             using (var process = Process.GetProcessById((int)pid)) {

@@ -51,7 +51,7 @@ function fitMetrics() {
   const limit = Math.max(120, Math.floor((availableWidth ?? window.innerWidth) / zoom) - 16);
   $('shell').style.maxWidth = `${limit + 16}px`;
   $('bar').style.maxWidth = `${limit}px`;
-  if (availableHeight) $('details').style.maxHeight = `${Math.max(160, Math.min(480, Math.floor(availableHeight / zoom) - $('bar').offsetHeight - 42))}px`;
+  if (availableHeight) $('details').style.maxHeight = `${Math.max(32, Math.min(480, Math.floor(availableHeight / zoom) - $('bar').offsetHeight - 42))}px`;
   const metrics = $('metrics');
   const enabled = [...metrics.querySelectorAll('.metric:not([hidden])')];
   for (const node of enabled) node.classList.remove('overflowed');
@@ -94,7 +94,7 @@ function measure() {
     const width = Math.ceil((Math.max($('bar').offsetWidth, detailsOpen ? $('details').offsetWidth : 0) + 16) * zoom);
     const height = Math.ceil($('shell').getBoundingClientRect().height);
     const size = `${width}x${height}`;
-    if (size !== lastResize) { lastResize = size; api.resize(width, height); }
+    if (size !== lastResize) { lastResize = size; api.resize(width, height, Math.ceil(($('bar').offsetHeight + 16) * zoom)); }
   });
 }
 function detailVisibility(open) {
@@ -117,7 +117,7 @@ function render(state) {
   document.body.style.zoom = settings.scale;
   $('shell').classList.toggle('bottom', settings.placement !== 'top-right');
   $('bar').classList.toggle('zu-light', !state.dark);
-  $('bar').classList.toggle('draggable', settings.allowDrag);
+  $('bar').classList.toggle('draggable', settings.allowDrag && !settings.dockToComposer);
   $('shell').classList.toggle('hide-labels', settings.hideLabels);
   const shortModes = { following: '跟随', recent: '最近', pinned: '锁定', ambiguous: '待选', empty: '暂无', unbound: '等待' };
   $('route').textContent = shortModes[state.selection.mode];
@@ -199,7 +199,7 @@ document.addEventListener('click', event => {
 $('bar').addEventListener('mouseenter', () => $('bar').classList.add('pointer-near'));
 $('bar').addEventListener('mouseleave', () => $('bar').classList.remove('pointer-near'));
 $('bar').addEventListener('pointerdown', event => {
-  if (!snapshot?.settings.allowDrag || event.button !== 0 || event.target.closest('button')) return;
+  if (!snapshot?.settings.allowDrag || snapshot?.settings.dockToComposer || event.button !== 0 || event.target.closest('button')) return;
   event.preventDefault();
   dragError = '';
   dragPointer = event.pointerId;

@@ -52,6 +52,9 @@ api.onSnapshot(state => {
     if (input.type === 'checkbox') input.checked = value; else input.value = input.id === 'opacity' ? Math.round((value ?? 1) * 100) : value ?? '';
   }
   opacityLabel();
+  for (const key of ['placement', 'allowDrag', 'offsetX', 'offsetY', 'alwaysVisible', 'rememberDisplayPositions']) document.querySelector(`[data-setting="${key}"]`).disabled = state.settings.dockToComposer;
+  const docking = { below: '已贴靠输入框下方', above: '下方空间不足，已贴靠上方', waiting: '等待识别输入框，浮条暂时隐藏', 'host-hidden': 'Codex 不在前台，贴靠浮条已隐藏' };
+  $('composer-note').textContent = state.settings.dockToComposer ? `${docking[state.runtime?.composerDock] ?? '正在识别输入框'}。独立浮层随输入框移动，暂停自由拖动和位置偏移；关闭后恢复原浮动位置。` : '独立浮层随输入框移动，优先放在下方；空间不足时放在上方。未识别到输入框或离开 Codex 时隐藏，不遮挡输入与发送按钮。此模式暂停自由拖动和位置偏移。';
   renderChats(); window.toolPanel.update(state);
   $('connection').textContent = `${state.selection.connected ? '已连接 · ' : ''}${labels[state.selection.mode]} · ${state.health.sessionCount} 个本地聊天`;
   const runtime = state.runtime ?? {};
@@ -70,6 +73,8 @@ api.onSnapshot(state => {
   $('diag-cache').textContent = state.health.cacheError ? '缓存暂不可用，已直接读取日志' : `已复用 ${state.health.cacheHits ?? 0} 个历史日志`;
   $('diag-display').textContent = `${runtime.displayCount ?? 1} 个 · 当前缩放 ${Math.round((runtime.displayScale ?? 1) * 100)}%`;
   $('diag-overlay').textContent = runtime.overlayVisible ? '正在显示' : runtime.manuallyHidden ? '已手动隐藏' : !state.settings.alwaysVisible && !runtime.codexForeground ? '按设置自动隐藏' : '暂未显示';
+  $('diag-layer').textContent = state.settings.desktopCompatibility ? runtime.overlayTopmost ? '加强置顶已启用' : '加强置顶已启用，等待层级恢复' : '普通置顶';
+  $('diag-composer').textContent = state.settings.dockToComposer ? docking[runtime.composerDock] ?? '正在识别输入框' : '未启用';
   $('diag-logs').textContent = `${state.health.fileCount} 个文件 / ${state.health.sessionCount} 个聊天${state.health.readErrors ? ' · ' + state.health.readErrors + ' 个读取错误' : ''}${state.health.indexing ? ' · 索引中' : ''}`;
   $('diag-updated').textContent = state.session?.updatedAt ? new Date(state.session.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '等待首次模型响应';
   $('diag-advice').textContent = state.health.readErrors ? '部分目录或日志暂不可读，已保留可用缓存；统计可能不完整，程序会自动重试。' : state.selection.reason === 'duplicate-title' ? '同名聊天缺少近期页面确认，请在“聊天”中锁定目标，或重新进入目标聊天。' : !state.selection.connected ? 'IPC 连接正在重试；页面路径和标题识别仍可独立工作。' : state.selection.mode === 'ambiguous' ? '多个窗口或同名聊天无法唯一识别，请在“聊天”中锁定目标。' : (!runtime.watcherHealthy || runtime.watcherError) && !runtime.testMode ? '窗口跟随助手会自动重启；“始终显示”可暂时保持浮条可见。' : !runtime.overlayVisible && !state.settings.alwaysVisible && !runtime.codexForeground ? '切回 Codex 后浮条会自动显示。' : '运行状态正常；空闲聊天的 Token 更新时间可以早于当前时间。';

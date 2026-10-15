@@ -1,4 +1,4 @@
-# Codex Token 状态条 V1.6（Windows）
+# Codex Token 状态条 V1.7（Windows）
 
 为 Codex 桌面版提供一个跟随窗口的独立浮条。基于
 [zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar)
@@ -15,7 +15,7 @@
 
 ## 开始使用
 
-从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.6-Windows-x64.zip`。
+从 [GitHub Releases](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest) 下载 `CodexTokenStatusbar-V1.7-Windows-x64.zip`。
 
 安装版：解压整个压缩包，双击 **`安装.cmd`**，选择是否开机启动和创建桌面入口，再点击“安装并启动”。安装到当前用户目录，无需管理员权限。可在 Windows“设置 → 应用”中卸载。
 
@@ -24,6 +24,9 @@
 
 1. 打开 Codex 桌面版，进入一个有模型响应记录的聊天。
 2. 浮条默认出现在窗口右上方；切换到其他应用时自动隐藏。
+   使用 Seelen UI 等第三方桌面时，默认启用“兼容第三方桌面（加强置顶）”，自动恢复窗口层级且不抢键盘焦点。需要在其他应用中保留浮条时，另行勾选“切换到其他应用时仍显示”。
+   在“设置 → 显示 → 位置与拖动”中勾选“贴靠 Codex 输入框”，可随输入框移动，优先放在下方，空间不足时放在上方。此模式仅在识别到前台 Codex 输入框时显示，暂停自由拖动与位置偏移；关闭后恢复原浮动位置。无法识别、数据过期或切换应用时隐藏，不沿用其他页面的位置。“恢复浮条位置”也可退出贴靠模式。
+   输入框贴靠仍是独立浮层，不会向 Codex 注入代码或修改安装文件，也不为 Codex 布局挤出额外空间。当前版本未实现 Codex 原生内嵌；Codex 更新导致无障碍结构变化时，可能需要重新适配。默认浮动模式与聊天识别不受输入框识别失败影响。
 3. 鼠标进入浮条时自动半透明避让，移开后恢复；点击左侧 **C / 跟随** 展开明细，再点 C 收起。悬停与移开均不改变明细状态。
 4. 点击 **⚙** 调整显示项、主题、大小、位置，或者锁定一个聊天。勾选“允许自由拖动浮条”后，拖动指标或空白处移动浮条，松开后保存位置；C 和设置按钮保持可点击。
 5. 托盘图标右键可以刷新、显示/隐藏、设置或退出。托盘图标可能在 `^` 内。

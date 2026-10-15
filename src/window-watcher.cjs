@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
+const { validRect } = require('./composer-position.cjs');
 const safeInteger = value => Number.isSafeInteger(value) && value >= 0;
 function validGeometry(sample) {
   return sample && typeof sample.visible === 'boolean' && safeInteger(sample.processId) && safeInteger(sample.windowCount) && (!sample.visible || safeInteger(sample.handle) && sample.handle > 0 && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(sample[key]) && Math.abs(sample[key]) < 100000) && sample.width >= 350 && sample.height >= 250);
@@ -13,7 +14,7 @@ class WindowWatcher extends EventEmitter {
     this.backend = exists(executable) ? 'independent' : 'powershell';
     this.geometry = null; this.title = null; this.geometryAt = 0; this.titleAt = 0;
     this.error = null; this.titleError = null; this.geometryFailures = 0;
-    this.target = null; this.stopped = false; this.geometryTimer = null; this.titleTimer = null;
+    this.target = null; this.stopped = false; this.geometryTimer = null; this.titleTimer = null; this.trackComposer = false;
   }
   status() {
     return { backend: this.backend, geometryRunning: Boolean(this.geometry && !this.geometry.killed), geometryHealthy: Boolean(this.geometryAt && this.now() - this.geometryAt < this.timeoutMs), titleHealthy: this.backend === 'powershell' ? Boolean(this.geometryAt && this.now() - this.geometryAt < this.timeoutMs) : Boolean(this.titleAt && this.now() - this.titleAt < this.timeoutMs), error: this.error, titleError: this.titleError };
@@ -60,8 +61,9 @@ class WindowWatcher extends EventEmitter {
   }
   sendTarget() {
     if (!this.target || !this.title?.stdin?.writable || this.title.stdin.destroyed || this.title.stdin.writableNeedDrain) return;
-    this.title.stdin.write(JSON.stringify(this.target) + '\n');
+    this.title.stdin.write(JSON.stringify({ ...this.target, composer: this.trackComposer }) + '\n');
   }
+  setComposerTracking(enabled) { const next = enabled === true; if (next !== this.trackComposer) { this.trackComposer = next; this.sendTarget(); } }
   startTitle() {
     this.titleTimer = null;
     if (this.stopped || this.backend !== 'independent') return;
@@ -72,7 +74,10 @@ class WindowWatcher extends EventEmitter {
     this.readLines(child, sample => {
       if (this.stopped || this.title !== child || !safeInteger(sample.handle) || !safeInteger(sample.processId) || !(sample.documentTitle === null || typeof sample.documentTitle === 'string' && sample.documentTitle.length <= 2048)) return;
       this.titleAt = this.now(); this.titleError = sample.unavailable ? '标题暂不可读，页面 ID 识别仍可用' : null;
-      if (!sample.idle && this.target?.handle === sample.handle && this.target?.processId === sample.processId) this.emit('title', sample);
+      if (!sample.idle && this.target?.handle === sample.handle && this.target?.processId === sample.processId) {
+        this.emit('title', sample);
+        if (this.trackComposer) this.emit('composer', { handle: sample.handle, processId: sample.processId, rect: validRect(sample.composer) ? sample.composer : null });
+      }
       this.emit('status');
     });
     child.stderr.on('data', () => { this.titleError = '标题助手报告错误，页面 ID 识别仍可用'; this.emit('status'); });
