@@ -7,6 +7,8 @@ const os = require('node:os');
 const { EventEmitter } = require('node:events');
 const { SessionAccumulator, JsonlDecoder, emptyUsage, localDay } = require('./metrics.cjs');
 const { UUID } = require('./codex-ipc.cjs');
+const { StatisticsCache, fingerprint } = require('./statistics-cache.cjs');
+const CACHE_VERSION = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'metrics.cjs'))).update('snapshot-v1:' + Intl.DateTimeFormat().resolvedOptions().timeZone).digest('hex');
 
 const CHUNK = 256 * 1024;
 const MAX_PASS_BYTES = 64 * 1024 * 1024;
@@ -14,11 +16,14 @@ const MAX_PASS_BYTES = 64 * 1024 * 1024;
 function codexHome() { return path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')); }
 
 class FileTail {
-  constructor(filename) { this.filename = filename; this.reset(); }
+  constructor(filename, saved = null) { this.filename = filename; this.reset(); this.saved = saved; }
   reset() {
     this.offset = 0;
     this.mtimeMs = 0;
     this.identity = null;
+    this.saved = null;
+    this.fingerprint = null;
+    this.complete = false;
     this.accumulator = new SessionAccumulator();
     this.decoder = new JsonlDecoder(line => this.accumulator.processLine(line));
     this.cachedSnapshots = new Map();
@@ -29,13 +34,26 @@ class FileTail {
       handle = await fsp.open(this.filename, 'r');
       const stat = await handle.stat();
       const identity = `${stat.dev}:${stat.ino}`;
+      if (this.saved) {
+        const saved = this.saved;
+        if (stat.size === saved.size && stat.mtimeMs === saved.mtimeMs && identity === saved.identity && await fingerprint(handle, stat.size) === saved.fingerprint) {
+          this.offset = stat.size; this.mtimeMs = stat.mtimeMs; this.identity = identity; this.fingerprint = saved.fingerprint; this.complete = true;
+          this.decoder.skippedLines = saved.skippedLines;
+          Object.assign(this.accumulator, { id: saved.snapshot.threadId, model: saved.snapshot.model, source: saved.isRootDesktop ? 'desktop' : null, totals: saved.snapshot.totals, hasUsage: saved.snapshot.hasUsage, accountingWarning: saved.snapshot.accountingWarning, usageIncomplete: saved.snapshot.usageIncomplete, daily: new Map(saved.daily) });
+          return { consumed: 0, pending: false, error: null, cacheHit: true };
+        }
+        // A snapshot cannot resume parsing. Rebuild only the changed file.
+        this.reset();
+      }
       if ((this.identity && this.identity !== identity) || stat.size < this.offset) this.reset();
+      if (stat.size === this.offset && this.mtimeMs && stat.mtimeMs !== this.mtimeMs) this.reset();
       this.identity = identity;
       this.mtimeMs = stat.mtimeMs;
       const snapshotSize = stat.size;
       if (snapshotSize === this.offset) return { consumed: 0, pending: false, error: null };
       this.cachedSnapshots.clear();
       let consumed = 0;
+      this.complete = false;
       const buffer = Buffer.alloc(CHUNK);
       while (this.offset < snapshotSize && consumed < budget) {
         const length = Math.min(CHUNK, snapshotSize - this.offset, budget - consumed);
@@ -47,14 +65,29 @@ class FileTail {
         consumed += bytesRead;
         await new Promise(resolve => setImmediate(resolve));
       }
+      this.complete = this.offset === snapshotSize && !this.decoder.pending && !this.decoder.dropping && !this.decoder.decoder.lastNeed;
+      if (this.complete) this.fingerprint = await fingerprint(handle, snapshotSize);
       return { consumed, pending: this.offset < snapshotSize, error: null };
     } catch (error) {
       return { consumed: 0, pending: false, error: error.code ?? 'read-error' };
     } finally { await handle?.close(); }
   }
   snapshot(includeRecords = true) {
+    if (this.saved) {
+      const snapshot = structuredClone(this.saved.snapshot);
+      if (!includeRecords) {
+        for (const stats of [snapshot.toolUsage, snapshot.turnToolUsage, snapshot.lastTurn?.toolUsage]) if (stats) stats.records = [];
+        snapshot.runningTools = []; snapshot.turnRunningTools = [];
+      }
+      return snapshot;
+    }
     if (!this.cachedSnapshots.has(includeRecords)) this.cachedSnapshots.set(includeRecords, this.accumulator.snapshot(includeRecords));
     return this.cachedSnapshots.get(includeRecords);
+  }
+  checkpoint() {
+    if (this.saved && this.complete) return this.saved;
+    if (!this.complete || !this.fingerprint || this.accumulator.activeTurn || !UUID.test(this.accumulator.id ?? '')) return null;
+    return { size: this.offset, mtimeMs: this.mtimeMs, identity: this.identity, fingerprint: this.fingerprint, snapshot: this.snapshot(), isRootDesktop: this.accumulator.isRootDesktop, daily: [...this.accumulator.daily], skippedLines: this.decoder.skippedLines };
   }
 }
 
@@ -82,7 +115,7 @@ async function discover(root, maxFiles = 8192) {
 }
 
 class SessionStore extends EventEmitter {
-  constructor(home = codexHome()) {
+  constructor(home = codexHome(), { cacheDirectory = null } = {}) {
     super();
     this.home = path.resolve(home);
     this.roots = [path.join(this.home, 'sessions'), path.join(this.home, 'archived_sessions')];
@@ -103,6 +136,8 @@ class SessionStore extends EventEmitter {
     this.lastDiscovery = 0;
     this.cursor = 0;
     this.fileErrors = new Map();
+    this.cache = cacheDirectory ? new StatisticsCache(cacheDirectory, this.home, CACHE_VERSION) : null;
+    this.cacheLoaded = false; this.cacheHits = 0; this.cacheDirty = false; this.cacheTimer = null; this.cacheWriting = null; this.cacheNextAt = 0;
   }
   setActive(active) { this.active = Boolean(active); }
   async start() {
@@ -129,6 +164,7 @@ class SessionStore extends EventEmitter {
     if (this.busy) { this.rescanRequested = true; this.needsDiscovery ||= full; return; }
     this.busy = true;
     try {
+      if (this.cache && !this.cacheLoaded) { await this.cache.load(); this.cacheLoaded = true; }
       full ||= this.needsDiscovery;
       let failedDirectories = [];
       let present;
@@ -141,7 +177,7 @@ class SessionStore extends EventEmitter {
         present = new Set(discovered.flatMap(result => result.filenames));
         for (const filename of this.files.keys()) if (!present.has(filename)) {
           if (failedDirectories.some(directory => filename.startsWith(directory + path.sep))) continue;
-          this.files.delete(filename);
+          this.files.delete(filename); this.cacheDirty = true;
           this.fileErrors.delete(filename);
         }
         this.lastDiscovery = Date.now();
@@ -155,9 +191,12 @@ class SessionStore extends EventEmitter {
       this.readErrors = this.directoryErrors ?? 0;
       for (const filename of ordered) {
         let tail = this.files.get(filename);
-        if (!tail) { tail = new FileTail(filename); this.files.set(filename, tail); }
+        if (!tail) { tail = new FileTail(filename, this.cache?.take(filename)); this.files.set(filename, tail); }
         if (budget <= 0) { pending = true; this.needsDiscovery = true; break; }
+        const wasCached = tail.complete && Boolean(tail.saved);
         const result = await tail.refresh(budget);
+        if (result.cacheHit && !wasCached) this.cacheHits++;
+        if (result.consumed) this.cacheDirty = true;
         budget -= result.consumed;
         pending ||= result.pending;
         if (result.error) this.fileErrors.set(filename, result.error);
@@ -169,6 +208,7 @@ class SessionStore extends EventEmitter {
       this.indexing = pending;
       this.revision++;
       this.emit('updated');
+      if (this.cache && this.cacheDirty && !pending && !this.stopped && !this.cacheTimer) this.cacheTimer = setTimeout(() => { this.cacheTimer = null; void this.flushCache(); }, Math.max(3000, this.cacheNextAt - Date.now()));
       if (pending) this.rescanRequested = true;
     } finally {
       this.busy = false;
@@ -226,13 +266,24 @@ class SessionStore extends EventEmitter {
         tokens: tail.accumulator.hasUsage ? tail.accumulator.totals.total_tokens : null,
         active: Boolean(tail.accumulator.activeTurn),
       })) : [],
-      health: { fileCount: this.files.size, sessionCount: sessions.length, indexing: this.indexing, truncated: this.truncated, readErrors: this.readErrors },
+      health: { fileCount: this.files.size, sessionCount: sessions.length, indexing: this.indexing, truncated: this.truncated, readErrors: this.readErrors, cacheHits: this.cacheHits, cacheError: this.cache?.error ?? null },
     };
+  }
+  async flushCache() {
+    if (!this.cache || !this.cacheDirty || this.busy) return;
+    if (this.cacheWriting) return this.cacheWriting;
+    this.cacheDirty = false;
+    this.cacheNextAt = Date.now() + 30000;
+    this.cacheWriting = this.cache.save(this.files);
+    await this.cacheWriting; this.cacheWriting = null;
+    if (this.cache.error) this.cacheDirty = true;
+    this.emit('updated');
   }
   stop() {
     this.stopped = true;
     clearInterval(this.scanTimer);
     clearTimeout(this.debounce);
+    clearTimeout(this.cacheTimer);
     for (const watcher of this.watchers) watcher.close();
   }
 }

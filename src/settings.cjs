@@ -2,18 +2,20 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { UUID } = require('./codex-ipc.cjs');
+const { cleanProfiles } = require('./display-position.cjs');
 
 const DEFAULTS = Object.freeze({
   theme: 'system', placement: 'top-right', scale: 1, alwaysVisible: false,
   showSpeed: true, showContext: true, showSession: true, showTurn: false,
   showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null,
   offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false,
+  rememberDisplayPositions: true, displayPositions: [],
 });
 
 function cleanSettings(input, previous = DEFAULTS) {
   const result = { ...previous };
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools', 'alwaysVisible', 'allowDrag', 'hideLabels']) {
+  for (const key of ['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools', 'alwaysVisible', 'allowDrag', 'hideLabels', 'rememberDisplayPositions']) {
     if (typeof input[key] === 'boolean') result[key] = input[key];
   }
   if (['system', 'dark', 'light'].includes(input.theme)) result.theme = input.theme;
@@ -22,6 +24,7 @@ function cleanSettings(input, previous = DEFAULTS) {
   if (input.pinnedThreadId === null || UUID.test(input.pinnedThreadId ?? '')) result.pinnedThreadId = input.pinnedThreadId;
   if (input.contextOverride === null || Number.isSafeInteger(input.contextOverride) && input.contextOverride >= 1000 && input.contextOverride <= 10000000) result.contextOverride = input.contextOverride;
   for (const key of ['offsetX', 'offsetY']) if (Number.isFinite(input[key])) result[key] = Math.max(-20000, Math.min(20000, Math.round(input[key])));
+  if (Object.hasOwn(input, 'displayPositions')) result.displayPositions = cleanProfiles(input.displayPositions);
   if (!['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools'].some(key => result[key])) result.showContext = true;
   return result;
 }

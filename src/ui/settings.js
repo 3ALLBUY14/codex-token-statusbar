@@ -58,16 +58,21 @@ api.onSnapshot(state => {
   $('diag-connection').textContent = state.selection.connected ? `已连接，${labels[state.selection.mode]}` : `${labels[state.selection.mode]}；IPC 连接正在重试`;
   const sources = { 'desktop-navigation': '页面路径 / 聊天 ID', 'visible-document-title': '页面标题备用匹配' };
   $('diag-source').textContent = state.selection.mode === 'pinned' ? '手动锁定' : sources[state.selection.source] ?? '等待页面识别';
-  $('diag-confidence').textContent = state.selection.mode === 'pinned' ? '手动确认' : { route: '页面 ID 已确认', title: '标题唯一匹配', uncertain: '身份不确定，请选择聊天' }[state.selection.confidence] ?? '等待确认';
+  $('diag-confidence').textContent = state.selection.mode === 'pinned' ? '手动确认' : { route: '页面 ID 已确认', title: '标题唯一匹配', 'cached-title': '沿用已确认聊天（索引暂不可读）', uncertain: '身份不确定，请选择聊天' }[state.selection.confidence] ?? '等待确认';
   $('diag-title').textContent = state.selection.title ?? '尚未取得聊天标题';
   $('diag-window').textContent = runtime.testMode ? '界面测试模式' : runtime.watcherError ? runtime.watcherError : runtime.watcherRunning && !runtime.watcherLastSampleAt ? '跟随助手启动中' : runtime.watcherRunning && !runtime.watcherHealthy ? '跟随助手无响应，正在重启' : runtime.watcherRunning ? runtime.codexForeground ? '正在跟随前台 Codex' : '助手正常，Codex 不在前台或已最小化' : '跟随助手重启中';
   $('diag-window-updated').textContent = runtime.watcherLastSampleAt ? `最近响应：${new Date(runtime.watcherLastSampleAt).toLocaleTimeString('zh-CN', { hour12: false })}` : '等待首次响应';
   $('diag-helper').textContent = runtime.testMode ? '界面测试模式' : runtime.watcherBackend === 'independent' ? '独立 Windows 助手' : runtime.watcherBackend === 'powershell' ? 'PowerShell 兼容助手' : '等待启动';
   $('diag-title-channel').textContent = runtime.testMode ? '界面测试模式' : runtime.titleError ?? (runtime.titleHealthy ? '正常' : '正在连接；页面 ID 识别仍可用');
+  const indexError = runtime.indexError;
+  $('diag-index').textContent = indexError ? `${indexError === 'size-limit' ? '索引超过读取上限' : indexError === 'ENOENT' ? '索引暂不存在' : '索引暂不可读'}${runtime.indexCached ? '，已保留缓存' : ''}` : '正常';
+  $('diag-cache').textContent = state.health.cacheError ? '缓存暂不可用，已直接读取日志' : `已复用 ${state.health.cacheHits ?? 0} 个历史日志`;
+  $('diag-display').textContent = `${runtime.displayCount ?? 1} 个 · 当前缩放 ${Math.round((runtime.displayScale ?? 1) * 100)}%`;
   $('diag-overlay').textContent = runtime.overlayVisible ? '正在显示' : runtime.manuallyHidden ? '已手动隐藏' : !state.settings.alwaysVisible && !runtime.codexForeground ? '按设置自动隐藏' : '暂未显示';
   $('diag-logs').textContent = `${state.health.fileCount} 个文件 / ${state.health.sessionCount} 个聊天${state.health.readErrors ? ' · ' + state.health.readErrors + ' 个读取错误' : ''}${state.health.indexing ? ' · 索引中' : ''}`;
   $('diag-updated').textContent = state.session?.updatedAt ? new Date(state.session.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '等待首次模型响应';
   $('diag-advice').textContent = state.health.readErrors ? '部分目录或日志暂不可读，已保留可用缓存；统计可能不完整，程序会自动重试。' : state.selection.reason === 'duplicate-title' ? '同名聊天缺少近期页面确认，请在“聊天”中锁定目标，或重新进入目标聊天。' : !state.selection.connected ? 'IPC 连接正在重试；页面路径和标题识别仍可独立工作。' : state.selection.mode === 'ambiguous' ? '多个窗口或同名聊天无法唯一识别，请在“聊天”中锁定目标。' : (!runtime.watcherHealthy || runtime.watcherError) && !runtime.testMode ? '窗口跟随助手会自动重启；“始终显示”可暂时保持浮条可见。' : !runtime.overlayVisible && !state.settings.alwaysVisible && !runtime.codexForeground ? '切回 Codex 后浮条会自动显示。' : '运行状态正常；空闲聊天的 Token 更新时间可以早于当前时间。';
+  if (indexError && !state.health.readErrors) $('diag-advice').textContent = '聊天标题索引读取受限，已保留可用标题；已确认聊天可继续显示，新切换聊天需页面 ID 确认，也可手动锁定。程序会自动重试。';
 });
 async function save(patch) {
   try { await api.setSettings(patch); $('save-status').textContent = ''; return true; }

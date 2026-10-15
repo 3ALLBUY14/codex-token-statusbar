@@ -40,6 +40,8 @@
       <div class="setting-row"><label for="scale">缩放</label><select id="scale" data-setting="scale"><option value="0.75">75%</option><option value="0.85">85%</option><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option><option value="1.5">150%</option></select></div>
       <label class="drag-option"><input type="checkbox" data-setting="allowDrag">允许自由拖动浮条</label>
       <p class="settings-note">开启后拖动浮条的指标或空白处，松开鼠标自动保存位置。C 和设置按钮仍可点击。</p>
+      <label><input type="checkbox" data-setting="rememberDisplayPositions">按显示器记住浮条位置</label>
+      <p class="settings-note">分别保存 Codex 所在显示器的位置，也支持拖到另一显示器。拔掉显示器后回到可用屏幕；“恢复浮条位置”会清除所有位置记忆。</p>
       <div class="setting-row"><label for="offsetX">水平偏移</label><input id="offsetX" type="number" min="-20000" max="20000" step="10" data-setting="offsetX"></div>
       <div class="setting-row"><label for="offsetY">垂直偏移</label><input id="offsetY" type="number" min="-20000" max="20000" step="10" data-setting="offsetY"></div>
       <label><input type="checkbox" data-setting="alwaysVisible">切换到其他应用时仍显示</label>
@@ -98,6 +100,9 @@
         <div><span>窗口跟随</span><strong id="diag-window">—</strong></div>
         <div><span>窗口助手</span><strong id="diag-helper">—</strong></div>
         <div><span>标题通道</span><strong id="diag-title-channel">—</strong></div>
+        <div><span>聊天标题索引</span><strong id="diag-index">—</strong></div>
+        <div><span>启动缓存</span><strong id="diag-cache">—</strong></div>
+        <div><span>显示器</span><strong id="diag-display">—</strong></div>
         <div><span>跟随助手心跳</span><strong id="diag-window-updated">—</strong></div>
         <div><span>浮条状态</span><strong id="diag-overlay">—</strong></div>
         <div><span>本地日志</span><strong id="diag-logs">—</strong></div>

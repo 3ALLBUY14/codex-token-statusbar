@@ -14,6 +14,8 @@ class VisibleChat extends EventEmitter {
     this.byId = new Map();
     this.stamp = null;
     this.indexed = false;
+    this.indexError = null;
+    this.confirmed = null;
     this.title = null;
     this.processId = 0;
     this.handle = 0;
@@ -28,6 +30,7 @@ class VisibleChat extends EventEmitter {
     const value = typeof title === 'string' && title.trim() && title.length <= 2048 ? title : null;
     if (value === this.title && processId === this.processId && handle === this.handle) return;
     this.title = value;
+    this.confirmed = null;
     this.processId = processId;
     this.handle = handle;
     this.changedAt = Date.now();
@@ -35,7 +38,10 @@ class VisibleChat extends EventEmitter {
   }
   status(processId) {
     const observed = Boolean(this.title && this.processId === processId);
-    return { observed, indexed: this.indexed, title: observed ? this.title : null, ids: observed ? this.names.get(this.title) ?? [] : [], changedAt: this.changedAt };
+    const ids = observed ? this.names.get(this.title) ?? [] : [];
+    if (!this.indexError && this.indexed && observed && ids.length === 1) this.confirmed = { title: this.title, processId, handle: this.handle };
+    const cachedMatch = Boolean(this.confirmed && observed && this.confirmed.title === this.title && this.confirmed.processId === processId && this.confirmed.handle === this.handle);
+    return { observed, indexed: this.indexed, stale: Boolean(this.indexError), error: this.indexError, cachedMatch, title: observed ? this.title : null, ids, changedAt: this.changedAt };
   }
   titleForId(id) { return this.byId.get(id) ?? null; }
   async scan() {
@@ -47,7 +53,10 @@ class VisibleChat extends EventEmitter {
       const stat = await fs.stat(this.filename);
       if (stat.size > MAX_INDEX_BYTES) throw new Error('index-size-limit');
       const stamp = `${stat.mtimeMs}:${stat.size}`;
-      if (this.stamp === stamp) return;
+      if (this.stamp === stamp) {
+        if (this.indexError) { this.indexError = null; this.emit('status'); }
+        return;
+      }
       const contents = await fs.readFile(this.filename, 'utf8');
       if (Buffer.byteLength(contents) > MAX_INDEX_BYTES) throw new Error('index-size-limit');
       const byId = new Map();
@@ -60,11 +69,14 @@ class VisibleChat extends EventEmitter {
       }
       const names = new Map();
       for (const [id, name] of byId) { if (!names.has(name)) names.set(name, []); names.get(name).push(id); }
-      this.byId = byId; this.names = names; this.stamp = stamp; this.indexed = true;
+      this.byId = byId; this.names = names; this.stamp = stamp; this.indexed = true; this.indexError = null; this.confirmed = null;
       if (!this.stopped) this.emit('status');
-    } catch {
-      const changed = this.indexed;
-      this.byId.clear(); this.names.clear(); this.stamp = null; this.indexed = false;
+    } catch (error) {
+      const code = error.message === 'index-size-limit' ? 'size-limit' : ['ENOENT', 'EACCES', 'EPERM'].includes(error.code) ? error.code : 'read-error';
+      const changed = this.indexError !== code;
+      // Keep labels and a previously confirmed observation, but never use stale
+      // names to infer a newly opened chat or a renamed/duplicate title.
+      this.indexError = code;
       if (changed && !this.stopped) this.emit('status');
     } finally { this.busy = false; }
   }
@@ -73,6 +85,10 @@ class VisibleChat extends EventEmitter {
 }
 
 function resolveVisibleSelection(navigation, title, hasRouteTitle = false, now = Date.now()) {
+  if (title.stale && !title.cachedMatch) {
+    if (navigation.known && !navigation.ambiguous && (!title.observed || navigation.time >= title.changedAt)) return { ...navigation, viewKnown: true, confidence: 'route' };
+    return { threadId: null, ambiguous: true, viewKnown: true, source: 'visible-document-title', confidence: 'uncertain', reason: 'index-unavailable' };
+  }
   if (title.observed && title.indexed && title.ids.length > 1 &&
       (!navigation.known || navigation.ambiguous || !title.ids.includes(navigation.threadId) || navigation.time < title.changedAt || now - navigation.time > 60000)) {
     return { threadId: null, ambiguous: true, viewKnown: true, source: 'visible-document-title', confidence: 'uncertain', reason: 'duplicate-title' };
@@ -86,7 +102,7 @@ function resolveVisibleSelection(navigation, title, hasRouteTitle = false, now =
     }
   }
   if (title.observed && title.indexed) {
-    return { threadId: title.ids.length === 1 ? title.ids[0] : null, ambiguous: title.ids.length > 1, viewKnown: true, source: 'visible-document-title', confidence: title.ids.length === 1 ? 'title' : 'uncertain' };
+    return { threadId: title.ids.length === 1 ? title.ids[0] : null, ambiguous: title.ids.length > 1, viewKnown: true, source: 'visible-document-title', confidence: title.ids.length === 1 ? title.stale ? 'cached-title' : 'title' : 'uncertain' };
   }
   if (navigation.known || navigation.ambiguous) return { ...navigation, viewKnown: navigation.known };
   return { threadId: null, ambiguous: false, viewKnown: false, source: null };

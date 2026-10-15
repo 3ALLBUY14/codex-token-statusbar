@@ -10,6 +10,7 @@ const { DesktopNavigation } = require('./desktop-navigation.cjs');
 const { VisibleChat, resolveVisibleSelection } = require('./visible-chat.cjs');
 const { SettingsStore } = require('./settings.cjs');
 const { contextStatus } = require('./metrics.cjs');
+const { anchorPosition, displayPosition, positionPatch, clampBounds } = require('./display-position.cjs');
 const { diagnosticSummary, newerVersion, versionParts, RELEASE_URL, UPDATE_URL } = require('./diagnostics.cjs');
 
 app.setName('Codex Token Statusbar');
@@ -57,6 +58,10 @@ function runtimeStatus() {
     watcherBackend: watcherState?.backend ?? null,
     titleHealthy: watcherState?.titleHealthy ?? false,
     titleError: watcherState?.titleError ?? null,
+    indexError: visibleChat?.indexError ?? null,
+    indexCached: Boolean(visibleChat?.indexError && visibleChat?.indexed),
+    displayCount: screen.getAllDisplays().length,
+    displayScale: currentDisplay().scaleFactor,
     watcherLastSampleAt: watcherLastSampleAt || null,
     watcherError,
     codexForeground: hostVisible,
@@ -82,7 +87,7 @@ function publish() {
     latest.sessions = catalogCache;
   }
   latest.selection.title = visibleChat?.titleForId(latest.selection.threadId) ?? null;
-  latest.settings = settings.value;
+  latest.settings = { ...settings.value, ...currentPositionSettings() };
   latest.runtime = runtimeStatus();
   if (process.argv.includes('--health-report')) {
     try {
@@ -95,6 +100,8 @@ function publish() {
         pinned: Boolean(settings.value.pinnedThreadId),
         watcherRunning: latest.runtime.watcherRunning, watcherHealthy: latest.runtime.watcherHealthy,
         watcherBackend: latest.runtime.watcherBackend, titleHealthy: latest.runtime.titleHealthy,
+        indexError: latest.runtime.indexError, cacheHits: latest.health.cacheHits, cacheError: latest.health.cacheError,
+        displayCount: latest.runtime.displayCount, displayScale: latest.runtime.displayScale,
         toolsTotal: latest.session?.toolUsage?.total ?? 0, toolsRecords: latest.session?.toolUsage?.records?.length ?? 0,
       }, null, 2));
     } catch { /* Optional diagnostics must not interrupt the overlay. */ }
@@ -106,7 +113,7 @@ function publish() {
     latest.session.context.overridden = true;
     Object.assign(latest.session.context, contextStatus(latest.session.context.percent, settings.value.contextOverride));
   }
-  const displayState = fixtureOverride ? { ...fixtureOverride, settings: { ...settings.value } } : previewFixture || demo ? demoState() : latest;
+  const displayState = fixtureOverride ? { ...fixtureOverride, settings: { ...settings.value, ...currentPositionSettings() } } : previewFixture || demo ? demoState() : latest;
   if (overlay && !overlay.isDestroyed() && (!overlayLoaded || overlay.isVisible() || smoke || demo)) {
     const session = displayState.session;
     const strip = stats => stats ? { ...stats, records: [] } : stats;
@@ -124,11 +131,20 @@ function queuePublish() {
   publishTimer = setTimeout(publish, 100);
 }
 
-function anchorPosition(host, size, placement) {
-  return {
-    x: placement === 'bottom-center' ? host.x + (host.width - size.width) / 2 : host.x + host.width - size.width - 18,
-    y: placement === 'top-right' ? host.y + 52 : host.y + host.height - size.height - 22,
-  };
+function currentDisplay() { return lastHost ? screen.getDisplayMatching(lastHost) : screen.getPrimaryDisplay(); }
+function currentPositionSettings() {
+  const position = displayPosition(settings.value, currentDisplay(), screen.getAllDisplays());
+  return { placement: position.placement, offsetX: position.offsetX, offsetY: position.offsetY };
+}
+function updatePositionSettings(patch) {
+  if (!patch || typeof patch !== 'object') return settings.value;
+  const host = currentDisplay(), position = displayPosition(settings.value, host, screen.getAllDisplays());
+  const location = Object.fromEntries(['placement', 'offsetX', 'offsetY'].filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]]));
+  if (!Object.keys(location).length) return settings.update(patch);
+  // Clean renderer input before putting it into a display-specific profile.
+  const clean = require('./settings.cjs').cleanSettings(location, { ...settings.value, ...currentPositionSettings() });
+  const rest = Object.fromEntries(Object.entries(patch).filter(([key]) => !Object.hasOwn(location, key)));
+  return settings.update({ ...rest, ...positionPatch(settings.value, host, position.display, Object.fromEntries(Object.keys(location).map(key => [key, clean[key]]))) });
 }
 
 function dragOverlay(action, point) {
@@ -149,8 +165,9 @@ function dragOverlay(action, point) {
   dragSession = null;
   if (action === 'end' && moved) {
     const target = overlay.getBounds();
-    const anchor = anchorPosition(lastHost || screen.getPrimaryDisplay().workArea, target, settings.value.placement);
-    try { settings.update({ offsetX: target.x - anchor.x, offsetY: target.y - anchor.y }); }
+    const host = currentDisplay(), destination = screen.getDisplayMatching(target), position = currentPositionSettings();
+    const anchor = anchorPosition(!settings.value.rememberDisplayPositions || destination.id === host.id ? lastHost || host.workArea : destination.workArea, target, position.placement);
+    try { settings.update(positionPatch(settings.value, host, destination, { placement: position.placement, offsetX: target.x - anchor.x, offsetY: target.y - anchor.y })); }
     catch (error) {
       const code = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'UNKNOWN';
       overlay.webContents.send('statusbar:drag-error', `位置未能保存（${code}），已恢复原位置。`);
@@ -164,8 +181,9 @@ function positionOverlay() {
   updateActivity();
   if (!overlay || overlay.isDestroyed() || !overlayLoaded) return;
   const value = settings.value;
-  const bounds = lastHost || screen.getPrimaryDisplay().workArea;
-  const display = screen.getDisplayMatching(bounds);
+  const host = currentDisplay(), position = displayPosition(value, host, screen.getAllDisplays());
+  const display = position.display;
+  const bounds = display.id === host.id ? lastHost || host.workArea : display.workArea;
   let work = display.workArea;
   const availableWidth = Math.min(Math.max(280, bounds.width - 24), work.width);
   let width = Math.min(overlaySize.width, availableWidth);
@@ -175,9 +193,9 @@ function positionOverlay() {
     overlay.webContents.send('statusbar:compact', compactLayout);
   }
   let height = Math.min(overlaySize.height, work.height);
-  const anchor = anchorPosition(bounds, { width, height }, value.placement);
-  let x = anchor.x + value.offsetX;
-  let y = anchor.y + value.offsetY;
+  const anchor = anchorPosition(bounds, { width, height }, position.placement);
+  let x = anchor.x + position.offsetX;
+  let y = anchor.y + position.offsetY;
   if (dragSession?.moved) {
     const cursor = screen.getCursorScreenPoint();
     work = screen.getDisplayNearestPoint(cursor).workArea;
@@ -185,12 +203,10 @@ function positionOverlay() {
     height = Math.min(dragSession.bounds.height, work.height);
     x = dragSession.bounds.x + cursor.x - dragSession.cursor.x;
     y = dragSession.bounds.y + cursor.y - dragSession.cursor.y;
-  } else {
+  } else if (!value.rememberDisplayPositions) {
     work = screen.getDisplayMatching({ x: Math.round(x), y: Math.round(y), width, height }).workArea;
   }
-  x = Math.max(work.x, Math.min(x, work.x + work.width - width));
-  y = Math.max(work.y, Math.min(y, work.y + work.height - height));
-  const next = { x: Math.round(x), y: Math.round(y), width: Math.ceil(width), height: Math.ceil(height) };
+  const next = clampBounds({ x, y, width, height }, work);
   const current = overlay.getBounds();
   if (Object.keys(next).some(key => next[key] !== current[key])) overlay.setBounds(next);
   const visible = !manuallyHidden && (smoke || demo || value.alwaysVisible || hostVisible || Boolean(ownForeground && settingsWindow?.isFocused()));
@@ -205,7 +221,7 @@ function positionOverlay() {
 }
 
 function restorePosition() {
-  settings.update({ placement: 'top-right', offsetX: 0, offsetY: 0 });
+  settings.update({ placement: 'top-right', offsetX: 0, offsetY: 0, displayPositions: [] });
   manuallyHidden = false;
   publish();
   positionOverlay();
@@ -324,7 +340,7 @@ function demoState() {
     { sequence: 3, type: 'FileChange', label: '文件修改', status: 'completed', timestamp: '2026-10-05T08:00:00Z', durationMs: null, exitCode: null },
   ];
   return {
-    settings: { ...settings.value }, dark: true,
+    settings: { ...settings.value, ...currentPositionSettings() }, dark: true,
     selection: { mode: 'following', connected: true, threadId: '00000000-0000-0000-0000-000000000001', routeCount: 1, title: 'Codex Token 状态条 · 演示聊天', source: 'desktop-navigation' },
     health: { fileCount: 6, sessionCount: 4, indexing: false, truncated: false, readErrors: 0 },
     session: {
@@ -361,7 +377,7 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 17 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 18 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
     document.getElementById('open-tool-details').click();
     const list = document.getElementById('settings-tool-records');
@@ -454,7 +470,8 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 300));
   const savedStatus = await settingsWindow.webContents.executeJavaScript("document.getElementById('save-status').textContent");
   const reloadedSettings = new SettingsStore(app.getPath('userData'));
-  if (savedStatus || settings.value.offsetX !== 40 || reloadedSettings.value.offsetX !== 40) throw new Error('Settings UI did not persist the change: ' + savedStatus);
+  const reloadedPosition = displayPosition(reloadedSettings.value, currentDisplay(), screen.getAllDisplays());
+  if (savedStatus || currentPositionSettings().offsetX !== 40 || reloadedPosition.offsetX !== 40 || !reloadedPosition.remembered) throw new Error('Settings UI did not persist the display position: ' + savedStatus);
   const hiddenText = await overlay.webContents.executeJavaScript(`({ labelsHidden: [...document.querySelectorAll('.statusbar .k, .statusbar .route')].every(element => getComputedStyle(element).display === 'none'), valuesVisible: document.getElementById('speed').getBoundingClientRect().width > 0 && document.getElementById('speed').textContent.includes('28.4'), buttonsVisible: document.querySelector('[data-action=details]').getBoundingClientRect().width > 0 && document.querySelector('[data-action=settings]').getBoundingClientRect().width > 0, detailsReadable: document.getElementById('details').innerText.includes('输入 Token') && document.getElementById('tools-detail').innerText.includes('17 次') })`);
   if (!reloadedSettings.value.hideLabels || Object.values(hiddenText).some(value => !value)) throw new Error('Hidden text setting failed: ' + JSON.stringify(hiddenText));
   const longDetails = demoState();
@@ -512,7 +529,7 @@ else {
   });
   app.whenReady().then(async () => {
     settings = new SettingsStore(app.getPath('userData'));
-    store = new SessionStore();
+    store = new SessionStore(undefined, { cacheDirectory: smoke || demo ? null : app.getPath('userData') });
     ipc = new CodexIpc();
     // Renderers cannot request remote resources. Update checks use an isolated,
     // in-memory session with a single allowed endpoint and no credentials.
@@ -568,7 +585,7 @@ else {
     ipcMain.handle('statusbar:settings', (event, patch) => {
       if (!validSender(event)) throw new Error('Invalid sender');
       let value;
-      try { value = settings.update(patch); }
+      try { value = updatePositionSettings(patch); }
       catch (error) {
         const code = typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'UNKNOWN';
         const message = code === 'ENOSPC' ? '磁盘空间不足，设置未保存。' : ['EACCES', 'EPERM'].includes(code) ? `设置文件无法写入（${code}），请检查目录权限或安全软件拦截。` : `设置未能保存（${code}），请稍后重试。`;

@@ -63,6 +63,32 @@ test('title index handles renames, duplicates, incomplete appends and process bo
   assert.deepEqual(visible.status(123).ids, [second]);
   await fs.unlink(file);
   await visible.scan();
-  assert.equal(visible.status(123).indexed, false);
-  assert.equal(visible.titleForId(second), null);
+  assert.equal(visible.status(123).stale, true);
+  assert.equal(visible.status(123).error, 'ENOENT');
+  assert.equal(visible.titleForId(second), 'renamed');
+});
+
+test('index failures retain a confirmed chat but never guess a new title, and recover', async t => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-title-recovery-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const visible = new VisibleChat(home); t.after(() => visible.stop());
+  const data = [first, second].map((id, i) => JSON.stringify({ id, thread_name: `chat-${i}` })).join('\n') + '\n';
+  await fs.writeFile(visible.filename, data); await visible.scan();
+  visible.observe('chat-0', 10, 20);
+  const noRoute = { known: false, ambiguous: false };
+  assert.equal(resolveVisibleSelection(noRoute, visible.status(10)).threadId, first);
+  const original = fs.stat;
+  const mock = t.mock.method(fs, 'stat', async filename => {
+    if (filename === visible.filename) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    return original(filename);
+  });
+  await visible.scan();
+  assert.equal(visible.titleForId(first), 'chat-0');
+  assert.equal(resolveVisibleSelection(noRoute, visible.status(10)).threadId, first);
+  visible.observe('chat-1', 10, 20);
+  assert.equal(resolveVisibleSelection(noRoute, visible.status(10)).reason, 'index-unavailable');
+  assert.equal(resolveVisibleSelection({ ...route, time: Date.now() + 1 }, visible.status(10)).threadId, first);
+  mock.mock.restore(); await visible.scan();
+  assert.equal(visible.status(10).stale, false);
+  assert.equal(resolveVisibleSelection(noRoute, visible.status(10)).threadId, second);
 });

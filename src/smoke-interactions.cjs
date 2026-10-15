@@ -62,7 +62,7 @@ async function checkInteractions({ overlay, settingsWindow, settings, publish, p
     const after = overlay.getBounds();
     const restored = new SettingsStore(path.dirname(settings.filename));
     if (Math.abs(after.x - before.x) < 50 || Math.abs(after.y - before.y) < 40) throw new Error('Native mouse drag did not move the bar: ' + JSON.stringify({ before, after, cursor: screen.getCursorScreenPoint(), dom: await run("({allowDrag:snapshot.settings.allowDrag, barClass:document.getElementById('bar').className, dragging:dragPointer, error:dragError})") }));
-    if (restored.value.offsetX !== settings.value.offsetX || restored.value.offsetY !== settings.value.offsetY || !restored.value.allowDrag) throw new Error('Dragged position was not saved');
+    if (JSON.stringify(restored.value.displayPositions) !== JSON.stringify(settings.value.displayPositions) || !restored.value.displayPositions.length || !restored.value.allowDrag) throw new Error('Dragged display position was not saved');
     const savedBounds = { ...after };
     positionOverlay();
     if (overlay.getBounds().x !== savedBounds.x || overlay.getBounds().y !== savedBounds.y) throw new Error('Window following reset dragged position');
