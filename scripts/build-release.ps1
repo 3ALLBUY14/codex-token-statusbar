@@ -57,8 +57,7 @@ Codex Token 状态条 $displayVersion — Windows x64
 窄窗口显示 +N 时，点击 C 查看被收纳的指标和每轮工具明细。
 浮条找不到时，双击桌面入口，或在托盘菜单/设置中选择「恢复浮条位置」。
 切换聊天会自动跟随；多个 Codex 窗口可在设置中锁定聊天。
-生成中默认每秒刷新可见文字的实时估算 t/s，不含隐藏推理或工具输出；无新文字时显示等待。
-设置 → 显示 → 外观 → 速度模式可切换为上一轮平均速度。实时估算不是模型原始 Token/s，不用于累计用量。
+平均输出速度是包含推理和工具时间的轮次平均值。
 设置分为显示、聊天、工具、诊断四栏。聊天支持标题搜索；工具支持运行状态、筛选和分页。
 诊断栏可复制状态摘要、主动检查更新并打开 GitHub 下载页。
 
@@ -68,7 +67,7 @@ Codex Token 状态条 $displayVersion — Windows x64
 开机启动可在 Windows「设置 → 应用 → 启动」关闭，或重新安装时取消勾选。
 
 无需管理员权限、Node.js 或 Python，安装和运行均无需下载额外组件。
-支持 Windows 10/11 x64；本机连接与流式订阅已实测 Codex Desktop 26.1013.4894.0。
+支持 Windows 10/11 x64；已实测 Codex Desktop 26.930.2377.0。
 这是第三方独立浮条，读取你朋友自己电脑的本地 Codex 日志。
 包内没有制作者的账号、密钥、聊天日志或个人显示设置。
 未使用代码签名；部分电脑可能提示未知发布者。
@@ -78,7 +77,7 @@ Codex Token 状态条 $displayVersion — Windows x64
     $files = @(Get-ChildItem -LiteralPath $appDirectory -File -Recurse | ForEach-Object {
         @{ path = $_.FullName.Substring($appDirectory.Length + 1); sha256 = (Get-StatusbarSha256 $_.FullName) }
     })
-    @{ version = $version; displayVersion = $displayVersion; architecture = 'x64'; testedCodex = '26.1013.4894.0'; files = $files } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $workRelease 'release.json') -Encoding UTF8
+    @{ version = $version; displayVersion = $displayVersion; architecture = 'x64'; testedCodex = '26.930.2377.0'; files = $files } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $workRelease 'release.json') -Encoding UTF8
     $workZip = Join-Path $staging ($releaseName + '.zip')
     Compress-Archive -LiteralPath $workRelease -DestinationPath $workZip -CompressionLevel Optimal
     (Get-StatusbarSha256 $workZip) + '  ' + [IO.Path]::GetFileName($zip) | Set-Content -LiteralPath ($workZip + '.sha256') -Encoding ASCII

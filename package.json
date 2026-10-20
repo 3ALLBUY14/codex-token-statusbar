@@ -1,7 +1,7 @@
 {
   "name": "codex-token-statusbar",
-  "version": "2.0.0",
-  "displayVersion": "V2.0",
+  "version": "1.9.0",
+  "displayVersion": "V1.9",
   "private": true,
   "description": "Local, read-only Codex Desktop token and context status bar, adapted from zcode-token-usage-statusbar.",
   "main": "src/main.cjs",
@@ -29,8 +29,5 @@
   "devDependencies": {
     "@electron/packager": "20.3.0",
     "electron": "44.5.1"
-  },
-  "dependencies": {
-    "js-tiktoken": "1.0.21"
   }
 }

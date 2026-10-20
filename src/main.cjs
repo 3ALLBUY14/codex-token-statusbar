@@ -6,8 +6,6 @@ const path = require('node:path');
 const { WindowWatcher } = require('./window-watcher.cjs');
 const { SessionStore } = require('./session-store.cjs');
 const { CodexIpc } = require('./codex-ipc.cjs');
-const { LiveSpeed } = require('./live-speed.cjs');
-const liveSpeed = new LiveSpeed();
 const { DesktopNavigation } = require('./desktop-navigation.cjs');
 const { VisibleChat, resolveVisibleSelection } = require('./visible-chat.cjs');
 const { SettingsStore } = require('./settings.cjs');
@@ -105,10 +103,6 @@ function publish() {
     latest.sessions = catalogCache;
   }
   latest.selection.title = visibleChat?.titleForId(latest.selection.threadId) ?? null;
-  const liveId = !smoke && !demo && settings.value.speedMode === 'live' && settings.value.showSpeed && (overlay?.isVisible() || settingsWindow?.isVisible()) ? latest.selection.threadId : null;
-  liveSpeed.select(liveId);
-  ipc.setStreamThread(liveId);
-  latest.liveSpeed = liveSpeed.snapshot();
   latest.settings = { ...settings.value, ...currentPositionSettings() };
   latest.runtime = runtimeStatus();
   if (process.argv.includes('--health-report')) {
@@ -117,7 +111,6 @@ function publish() {
       fs.writeFileSync(path.join(artifactDirectory, 'running-health.json'), JSON.stringify({
         pid: process.pid, version: displayVersion, updatedAt: new Date().toISOString(), ipcConnected: ipc.connected,
         selected: Boolean(latest.selection.threadId), routeCount: ipc.routes.size,
-        liveSpeedStatus: latest.liveSpeed.status, streamSubscribed: Boolean(ipc.streamSubscription),
         selectionSource: latest.selection.source, navigationKnown: navigation?.status().known ?? false,
         selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false,
         pinned: Boolean(settings.value.pinnedThreadId),
@@ -431,7 +424,7 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 24 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 23 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
   const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
   const settingsUx = await require('./settings-ux-smoke.cjs').checkSettingsUx({ win: settingsWindow, overlay, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
@@ -470,7 +463,6 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 150));
   fs.writeFileSync(path.join(artifactDirectory, 'settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
   const settingsFeatures = await require('./settings-smoke.cjs').checkSettingsFeatures({ win: settingsWindow, state: demoState(), settings, setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
-  const liveSpeedCheck = await require('./smoke-live-speed.cjs').checkLiveSpeed({ overlay, win: settingsWindow, state: demoState(), settings, setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
   await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-diagnostics").click()');
   const settingsScroll = [];
   const settingsTypography = [];
@@ -589,7 +581,6 @@ async function smokeCheck() {
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
   const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
   report.settingsFeatures = settingsFeatures;
-  report.liveSpeed = liveSpeedCheck;
   report.opacity = opacityCheck;
   report.settingsUx = settingsUx;
   report.overflowActions = overflowActions;
@@ -662,8 +653,6 @@ async function smokeDocking() {
       }
     }
     await settingsWindow.webContents.executeJavaScript("document.getElementById('tab-display').click(); document.getElementById('composer-alignment').scrollIntoView({block:'center'});");
-    if (settingsWindow.isMinimized()) settingsWindow.restore();
-    settingsWindow.showInactive(); await wait(200);
     fs.writeFileSync(path.join(artifactDirectory, 'composer-alignment-settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     composerSample.at = Date.now() - 4000; positionOverlay();
     if (overlay.isVisible()) throw new Error('Stale composer kept an overlay visible');
@@ -763,8 +752,6 @@ else {
     });
     store.on('updated', queuePublish);
     ipc.on('status', queuePublish);
-    ipc.on('stream', change => { liveSpeed.ingest(change); });
-    ipc.on('stream-reset', () => { liveSpeed.clear(); });
     nativeTheme.on('updated', queuePublish);
     screen.on('display-metrics-changed', positionOverlay);
     screen.on('display-removed', positionOverlay);
@@ -780,7 +767,7 @@ else {
     await store.start();
     publish();
     watchWindows();
-    if (!smoke && !demo) watcherWatchdog = setInterval(() => { checkWatcher(); if (liveSpeed.id && latest?.session?.active) queuePublish(); }, 1000);
+    if (!smoke && !demo) watcherWatchdog = setInterval(checkWatcher, 1000);
     if (demo) overlay.webContents.once('did-finish-load', () => overlay.webContents.send('statusbar:snapshot', demoState()));
     if (smoke) smokeCheck().catch(error => { console.error(error.stack ?? error.message); app.exit(1); });
   }).catch(error => { console.error(error.stack ?? error.message); app.exit(1); });

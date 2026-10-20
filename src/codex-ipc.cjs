@@ -70,27 +70,10 @@ class CodexIpc extends EventEmitter {
     this.recoveryDelay = recoveryDelay;
     this.recoveryCooldown = recoveryCooldown;
     this.lastRecovery = 0;
-    this.streamThreadId = null; this.streamSubscription = null;
   }
   status() { return { connected: this.connected, threadId: this.selectedId, routeCount: this.routes.size, ambiguous: new Set(this.routes.values()).size > 1 }; }
   send(value) {
     if (this.socket?.writable && !this.socket.destroyed) this.socket.write(frame(value));
-  }
-  setStreamThread(id) {
-    this.streamThreadId = UUID.test(id ?? '') ? id : null;
-    this.syncStream();
-  }
-  syncStream() {
-    const hosts = [...new Set([...this.routes].filter(([, id]) => id === this.streamThreadId).map(([key]) => key.split('\u001f')[1]))];
-    const next = this.connected && this.streamThreadId && hosts.length === 1 ? { conversationId: this.streamThreadId, hostId: hosts[0] } : null;
-    if (JSON.stringify(next) === JSON.stringify(this.streamSubscription)) return;
-    if (this.streamSubscription) this.streamFollowing(this.streamSubscription, false);
-    this.streamSubscription = next;
-    if (next) this.streamFollowing(next, true);
-    this.emit('stream-reset');
-  }
-  streamFollowing(target, following) {
-    if (this.connected && this.clientId) this.send({ type: 'broadcast', method: 'thread-stream-following-changed', version: 1, sourceClientId: this.clientId, params: { ...target, following } });
   }
   recoverIfUnbound() {
     clearTimeout(this.recoveryTimer);
@@ -131,12 +114,7 @@ class CodexIpc extends EventEmitter {
     if (value?.type !== 'broadcast' || !value.params || typeof value.params !== 'object') return;
     if (value.targetClientIds != null && (!Array.isArray(value.targetClientIds) || !value.targetClientIds.includes(this.clientId))) return;
     const p = value.params;
-    if (value.method === 'thread-stream-state-changed') {
-      if (value.version === 11 && this.streamSubscription?.conversationId === p.conversationId && this.streamSubscription?.hostId === p.hostId) this.emit('stream', p.change);
-      return;
-    }
     if (value.method === 'thread-stream-following-changed') {
-      if (value.sourceClientId === this.clientId) return;
       if (!UUID.test(p.conversationId ?? '') || typeof p.hostId !== 'string' || typeof value.sourceClientId !== 'string' || typeof p.following !== 'boolean') return;
       const key = `${value.sourceClientId}\u001f${p.hostId}\u001f${p.conversationId}`;
       if (p.following) this.routes.set(key, p.conversationId);
@@ -148,7 +126,6 @@ class CodexIpc extends EventEmitter {
     // Do not claim that the last event necessarily belongs to the foreground one.
     const ids = [...new Set(this.routes.values())];
     this.selectedId = ids.length === 1 ? ids[0] : null;
-    this.syncStream();
     this.emit('status', this.status());
     this.recoverIfUnbound();
   }
@@ -172,7 +149,6 @@ class CodexIpc extends EventEmitter {
       this.initializeId = null;
       this.connected = false;
       this.routes.clear();
-      this.streamSubscription = null; this.emit('stream-reset');
       this.selectedId = null;
       this.emit('status', this.status());
       if (!this.stopped) {
@@ -181,7 +157,7 @@ class CodexIpc extends EventEmitter {
       }
     });
   }
-  stop() { if (this.streamSubscription) this.streamFollowing(this.streamSubscription, false); this.streamThreadId = null; this.streamSubscription = null; this.stopped = true; clearTimeout(this.timer); clearTimeout(this.recoveryTimer); clearTimeout(this.initializeTimer); this.socket?.destroy(); }
+  stop() { this.stopped = true; clearTimeout(this.timer); clearTimeout(this.recoveryTimer); clearTimeout(this.initializeTimer); this.socket?.destroy(); }
 }
 
 module.exports = { CodexIpc, FrameDecoder, frame, UUID };

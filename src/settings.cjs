@@ -5,7 +5,7 @@ const { UUID } = require('./codex-ipc.cjs');
 const { cleanProfiles } = require('./display-position.cjs');
 
 const DEFAULTS = Object.freeze({
-  theme: 'system', placement: 'top-right', scale: 1, opacity: 1, alwaysVisible: false, speedMode: 'live',
+  theme: 'system', placement: 'top-right', scale: 1, opacity: 1, alwaysVisible: false,
   showSpeed: true, showContext: true, showSession: true, showTurn: false,
   showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null,
   offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false,
@@ -19,7 +19,6 @@ function cleanSettings(input, previous = DEFAULTS) {
     if (typeof input[key] === 'boolean') result[key] = input[key];
   }
   if (['system', 'dark', 'light'].includes(input.theme)) result.theme = input.theme;
-  if (['live', 'average'].includes(input.speedMode)) result.speedMode = input.speedMode;
   if (['center', 'left', 'right'].includes(input.composerAlignment)) result.composerAlignment = input.composerAlignment;
   if (['composer', 'titlebar'].includes(input.dockTarget)) result.dockTarget = input.dockTarget;
   if (['top-right', 'bottom-right', 'bottom-center'].includes(input.placement)) result.placement = input.placement;
