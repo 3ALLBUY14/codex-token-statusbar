@@ -136,7 +136,7 @@ $('restore-position').addEventListener('click', () => { void saveAction(() => ap
 $('quit').addEventListener('click', () => api.quit());
 $('reset').addEventListener('click', async () => {
   if (!current) return;
-  const defaults = { theme: 'system', scale: 1, opacity: 1, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: false };
+  const defaults = { theme: 'system', scale: 1, opacity: 1, speedMode: 'live', showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: false };
   const previous = Object.fromEntries(Object.keys(defaults).map(key => [key, current.settings[key]]));
   if (await save(defaults)) { resetPatch = previous; $('undo-reset').hidden = false; $('reset-message').textContent = '显示项已恢复默认，聊天锁定、窗口容量和浮条位置保留。'; }
 });

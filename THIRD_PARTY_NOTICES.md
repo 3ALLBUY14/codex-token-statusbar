@@ -1,5 +1,11 @@
 # Third-party notices
 
+Live visible-output speed uses the MIT-licensed `js-tiktoken` package
+and its bundled `o200k_base` encoding, with `base64-js` (MIT) as a dependency.
+The upstream tiktoken license is retained in `third_party/js-tiktoken/LICENSE`;
+`base64-js/LICENSE` is included in the packaged dependencies. Tokenization is an
+estimate for the selected model; no tokenizer data is downloaded at runtime.
+
 The capsule, status colors, context mini-bar, and panel styles are adapted from
 [xhwxt/zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar),
 commit `ac328de0523f60b83d0c5cd3ccacda8eda86f55e`.

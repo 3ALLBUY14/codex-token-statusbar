@@ -131,8 +131,13 @@ function render(state) {
     document.querySelector(`[data-metric="${metric}"]`).hidden = !settings[`show${metric[0].toUpperCase()}${metric.slice(1)}`];
   }
   const speed = s?.lastTurn?.speed?.tokensPerSecond;
-  $('speed').textContent = Number.isFinite(speed) ? `~${speed.toFixed(1)}` : '—';
-  $('speed').className = `v ${speed >= 70 ? 'ok' : speed >= 40 ? 'warm' : Number.isFinite(speed) ? 'hot' : 'dim'}`;
+  const realtime = settings.speedMode === 'live' && s?.active;
+  const currentSpeed = realtime ? state.liveSpeed?.tokensPerSecond : speed;
+  $('speed').textContent = Number.isFinite(currentSpeed) ? `~${currentSpeed.toFixed(1)}` : realtime ? '等待' : '—';
+  $('speed').className = `v ${currentSpeed >= 70 ? 'ok' : currentSpeed >= 40 ? 'warm' : Number.isFinite(currentSpeed) ? 'hot' : 'dim'}`;
+  const speedMetric = document.querySelector('[data-metric=speed]');
+  speedMetric.querySelector('.k').textContent = realtime ? '实时估' : '均速';
+  speedMetric.setAttribute('aria-label', realtime ? '可见输出实时估算速度，不含隐藏推理和工具输出' : '上一轮平均输出速度');
   const pct = s?.context.percent;
   const contextClass = s?.context.exceeded || s?.context.level === 'critical' ? 'hot' : s?.context.level === 'warning' ? 'warm' : Number.isFinite(pct) ? 'ok' : 'dim';
   $('context').textContent = Number.isFinite(pct) ? `${pct.toFixed(1)}%` : '—';
@@ -157,7 +162,7 @@ function render(state) {
   $('turn-tools-detail').textContent = turnTools ? `${number(turnTools.total)} 次 · 失败 ${number(turnTools.failed)} 次 · 有耗时记录 ${number(turnTools.timed)} 次 / ${time(turnTools.durationMs)}` : '—';
   renderToolGroups($('turn-tool-breakdown'), turnTools?.byType, s?.active ? '本轮工具分类' : '上轮工具分类');
   $('activity').className = `activity ${s?.active ? 'busy' : s?.hasUsage ? 'done' : ''}`;
-  $('activity').setAttribute('aria-label', s?.active ? '当前聊天正在运行；均速保留上一轮结果' : s?.hasUsage ? '当前聊天空闲' : '等待 Token 记录');
+  $('activity').setAttribute('aria-label', s?.active ? realtime ? '当前聊天正在运行；显示可见输出实时估算，未收到新文字时等待' : '当前聊天正在运行；均速保留上一轮结果' : s?.hasUsage ? '当前聊天空闲' : '等待 Token 记录');
   $('binding').textContent = modes[state.selection.mode];
   $('chat-title').textContent = state.selection.title ?? '';
   $('chat-title').hidden = !state.selection.title;
@@ -172,9 +177,10 @@ function render(state) {
   $('context-origin').textContent = s?.context.overridden ? '手动窗口容量' : '最新调用';
   $('time-detail').textContent = `${time(s?.lastTurn?.durationMs)} / ${time(s?.lastTurn?.firstTokenMs)}`;
   $('speed-detail').textContent = Number.isFinite(speed) ? `≈ ${speed.toFixed(1)} tokens/s` : '—';
-  $('speed-note').textContent = Number.isFinite(speed)
+  $('live-speed-detail').textContent = settings.speedMode !== 'live' ? '未启用' : !s?.active ? '空闲' : Number.isFinite(state.liveSpeed?.tokensPerSecond) ? `≈ ${state.liveSpeed.tokensPerSecond.toFixed(1)} tokens/s` : '等待流式文字';
+  $('speed-note').textContent = '实时估算按最近约 5 秒可见回答和计划文字，用 o200k_base 分词估算；不代表模型原始 Token 计数，不含隐藏推理或工具输出，未收到连续文字时显示等待。' + (Number.isFinite(speed)
     ? `平均速度＝上一轮输出 Token ÷ ${s.lastTurn.speed.excludesFirstToken ? '（轮次耗时－首 Token 延迟）' : '轮次耗时'}。包含推理输出、工具执行和多次模型调用，不能代表纯生成速度。`
-    : '完成一轮并记录输出 Token 与耗时后显示平均速度。它包含工具执行和多次模型调用，不能代表纯生成速度。';
+    : '完成一轮并记录输出 Token 与耗时后显示平均速度。它包含工具执行和多次模型调用，不能代表纯生成速度。');
   const notes = [];
   if (dragError) notes.push(dragError);
   if (state.selection.mode === 'recent') notes.push('正在重新识别当前聊天，暂显示最近活跃聊天。');
