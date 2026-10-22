@@ -1,5 +1,12 @@
 # Third-party notices
 
+The per-response accounting, source/model breakdown, selection epochs and staged
+diagnostic ideas were studied against
+[StephenAll/codex_token_sidebar](https://github.com/StephenAll/codex_token_sidebar),
+commit `d849f8cf38e651b8787e0c20ee7bb95b6f3e7ab5` (MIT).
+The implementation here is independent JavaScript; no runtime, installer or CDP
+injection code from that project is bundled or executed.
+
 The capsule, status colors, context mini-bar, and panel styles are adapted from
 [xhwxt/zcode-token-usage-statusbar](https://github.com/xhwxt/zcode-token-usage-statusbar),
 commit `ac328de0523f60b83d0c5cd3ccacda8eda86f55e`.

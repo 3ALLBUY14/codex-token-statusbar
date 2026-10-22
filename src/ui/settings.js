@@ -1,6 +1,7 @@
 'use strict';
 const api = window.codexStatusbar;
 const $ = id => document.getElementById(id);
+const snapshotGuard = new SnapshotGuard();
 let current, pane = 'display', chatPage = 0, chatContext = '', lastChatRender = '', resetPatch = null;
 let saveGeneration = 0, saveTimer = null, failedSave = null;
 const labels = { following: '跟随当前聊天', recent: '当前聊天未绑定，显示最近活跃聊天', pinned: '已锁定聊天', ambiguous: '多个窗口或同名聊天，请选择聊天', empty: '当前页面暂无本地聊天数据', unbound: '等待首次聊天记录' };
@@ -45,7 +46,11 @@ function renderChats() {
   $('chat-prev').disabled = chatPage === 0; $('chat-next').disabled = chatPage >= pages - 1;
 }
 api.onSnapshot(state => {
+  if (!snapshotGuard.accept(state)) return;
   current = state; document.documentElement.classList.toggle('light', !state.dark);
+  renderUsageDetails($('settings-usage-details'), state.session);
+  $('diag-state').textContent = state.diagnostic?.label ?? '正在检查';
+  $('diag-state-note').textContent = state.diagnostic?.detail ?? '';
   for (const input of document.querySelectorAll('[data-setting]')) {
     if (input === document.activeElement || input.id === 'chat') continue;
     const value = state.settings[input.dataset.setting];

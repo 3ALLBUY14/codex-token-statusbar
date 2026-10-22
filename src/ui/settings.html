@@ -75,6 +75,7 @@
       <div class="setting-row"><label for="contextOverride">手动窗口容量</label><input id="contextOverride" type="number" min="1000" max="10000000" step="1000" placeholder="自动" data-setting="contextOverride"></div>
       <p class="settings-note">容量留空则使用日志记录的值。100 万 Token 以下的窗口在 70% / 85% 预警，100 万及以上在 40% / 60% 预警。多个 Codex 窗口同时打开时，可锁定一个聊天，避免混用数据。</p>
     </section>
+    <section class="settings-group"><h2>用量来源与模型</h2><p class="settings-note">切换下方范围只影响明细；浮条始终显示当前聊天，关联子任务不重复加入浮条累计。</p><div id="settings-usage-details"></div></section>
     </div>
     <div id="pane-tools" role="tabpanel" aria-labelledby="tab-tools" data-pane="tools" hidden>
     <section class="settings-group" aria-labelledby="tool-details-heading">
@@ -106,6 +107,8 @@
     <div id="pane-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics" data-pane="diagnostics" hidden>
     <section class="settings-group" aria-label="运行诊断">
       <h2>运行诊断</h2>
+      <p class="status-line" id="diag-state" role="status">正在检查</p>
+      <p class="settings-note" id="diag-state-note"></p>
       <div class="diagnostic-rows">
         <div><span>版本</span><strong id="diag-version">—</strong></div>
         <div><span>聊天连接</span><strong id="diag-connection">—</strong></div>
@@ -134,6 +137,8 @@
     <div class="actions"><button class="action-button" id="refresh">重新检测与刷新</button><button class="action-button" id="restore-position">恢复浮条位置</button><button class="action-button" id="reset">恢复默认显示</button><button class="action-button" id="quit">退出状态条</button></div>
     <p class="settings-note" id="reset-message" aria-live="polite"></p><button class="action-button" id="undo-reset" hidden>撤销恢复默认显示</button>
   </main>
+  <script src="snapshot-guard.js"></script>
+  <script src="usage-details.js"></script>
   <script src="tool-details.js"></script>
   <script src="settings.js"></script>
 </body>

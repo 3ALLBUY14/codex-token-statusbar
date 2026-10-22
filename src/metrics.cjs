@@ -110,6 +110,7 @@ class SessionAccumulator {
     let row;
     try { row = JSON.parse(line); } catch { this.malformedLines++; return; }
     this.processEvent(row);
+    return row;
   }
 
   processEvent(row) {

@@ -11,7 +11,7 @@ const { VisibleChat, resolveVisibleSelection } = require('./visible-chat.cjs');
 const { SettingsStore } = require('./settings.cjs');
 const { contextStatus } = require('./metrics.cjs');
 const { anchorPosition, displayPosition, positionPatch, clampBounds } = require('./display-position.cjs');
-const { diagnosticSummary, newerVersion, versionParts, RELEASE_URL, UPDATE_URL } = require('./diagnostics.cjs');
+const { diagnosticSummary, diagnosticState, newerVersion, versionParts, RELEASE_URL, UPDATE_URL } = require('./diagnostics.cjs');
 const { OverlayLayer } = require('./overlay-layer.cjs');
 const { composerPosition, titlebarPosition } = require('./composer-position.cjs');
 const overlayLayer = new OverlayLayer();
@@ -44,6 +44,7 @@ let catalogCache = null;
 let catalogSignature = '';
 let updateRequest = null;
 let composerSample = null, hostHandle = 0, dockStatus = 'off';
+let deliverySequence = 0, deliveryEpoch = 0, deliverySelection = null;
 function previewOpacity(value) {
   const opacity = Number.isFinite(value) ? Math.max(0.2, Math.min(1, value)) : null;
   if (overlay && !overlay.isDestroyed()) overlay.webContents.send('statusbar:opacity-preview', opacity);
@@ -111,6 +112,8 @@ function publish() {
       fs.writeFileSync(path.join(artifactDirectory, 'running-health.json'), JSON.stringify({
         pid: process.pid, version: displayVersion, updatedAt: new Date().toISOString(), ipcConnected: ipc.connected,
         selected: Boolean(latest.selection.threadId), routeCount: ipc.routes.size,
+        accountingMethod: latest.session?.accounting?.method ?? null, accountingPartial: Boolean(latest.session?.accounting?.partial),
+        relatedThreads: latest.session?.accounting?.relatedThreads ?? 0,
         selectionSource: latest.selection.source, navigationKnown: navigation?.status().known ?? false,
         selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false,
         pinned: Boolean(settings.value.pinnedThreadId),
@@ -131,7 +134,11 @@ function publish() {
     Object.assign(latest.session.context, contextStatus(latest.session.context.percent, settings.value.contextOverride));
   }
   const displayState = fixtureOverride ? { ...fixtureOverride, settings: { ...settings.value, ...currentPositionSettings() } } : previewFixture || demo ? demoState() : latest;
-  if (overlay && !overlay.isDestroyed() && (!overlayLoaded || overlay.isVisible() || smoke || demo)) {
+  const selectionKey = `${displayState.selection.mode}:${displayState.selection.threadId ?? ''}`;
+  if (selectionKey !== deliverySelection) { deliverySelection = selectionKey; deliveryEpoch++; }
+  displayState.delivery = { sequence: ++deliverySequence, epoch: deliveryEpoch, sentAt: Date.now() };
+  displayState.diagnostic = diagnosticState(displayState);
+  if (overlay && !overlay.isDestroyed() && (!overlayLoaded || overlay.isVisible() || settings.value.dockToComposer || demo)) {
     const session = displayState.session;
     const strip = stats => stats ? { ...stats, records: [] } : stats;
     const lightweight = session ? { ...session, toolUsage: strip(session.toolUsage), turnToolUsage: strip(session.turnToolUsage), lastTurn: session.lastTurn ? { ...session.lastTurn, toolUsage: strip(session.lastTurn.toolUsage) } : null, runningTools: [], turnRunningTools: [] } : null;
@@ -463,6 +470,7 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 150));
   fs.writeFileSync(path.join(artifactDirectory, 'settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
   const settingsFeatures = await require('./settings-smoke.cjs').checkSettingsFeatures({ win: settingsWindow, state: demoState(), settings, setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
+  const usageCheck = await require('./smoke-usage.cjs').checkUsage({ overlay, win: settingsWindow, settings, state: demoState(), setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
   await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-diagnostics").click()');
   const settingsScroll = [];
   const settingsTypography = [];
@@ -581,6 +589,7 @@ async function smokeCheck() {
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
   const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
   report.settingsFeatures = settingsFeatures;
+  report.usage = usageCheck;
   report.opacity = opacityCheck;
   report.settingsUx = settingsUx;
   report.overflowActions = overflowActions;
@@ -630,12 +639,20 @@ async function smokeDocking() {
     const restoredAlignment = await settingsWindow.webContents.executeJavaScript("document.getElementById('composer-alignment').value === 'right' && !document.getElementById('composer-alignment').disabled");
     if (!restoredAlignment) throw new Error('Composer alignment did not restore after reloading settings');
     const titlebarChecks = [];
+    // Reproduce changing dock regions after the old region has disappeared.
+    composerSample = null; positionOverlay(); await wait(150);
+    if (overlay.isVisible()) throw new Error('Missing dock region should hide before recovery');
+    overlay.webContents.setBackgroundThrottling(true);
     settings.update({ scale: 1.5 });
     await settingsWindow.webContents.executeJavaScript("(() => { const input=document.getElementById('dock-target'); input.value='titlebar'; input.dispatchEvent(new Event('change',{bubbles:true})); })()");
     for (let attempt = 0; settings.value.dockTarget !== 'titlebar' && attempt < 30; attempt++) await wait(50);
     if (settings.value.dockTarget !== 'titlebar' || new SettingsStore(path.dirname(settings.filename)).value.dockTarget !== 'titlebar') throw new Error('Titlebar target did not persist');
     composerSample = { handle: 123, target: 'titlebar', at: Date.now(), host: { ...lastHost }, rect: { x: lastHost.x + 260, y: lastHost.y + 4, width: lastHost.width - 420, height: 36 } };
     publish(); positionOverlay();
+    for (let attempt = 0; !overlay.isVisible() && attempt < 40; attempt++) await wait(50);
+    const hiddenRegionRecovered = overlay.isVisible();
+    if (!hiddenRegionRecovered) throw new Error('Hidden docked renderer failed to remeasure the new titlebar region');
+    overlay.webContents.setBackgroundThrottling(false);
     for (const alignment of ['left', 'center', 'right']) {
       settings.update({ composerAlignment: alignment }); composerSample.at = Date.now(); publish(); positionOverlay();
       for (const open of [false, true]) {
@@ -653,6 +670,7 @@ async function smokeDocking() {
       }
     }
     await settingsWindow.webContents.executeJavaScript("document.getElementById('tab-display').click(); document.getElementById('composer-alignment').scrollIntoView({block:'center'});");
+    if (settingsWindow.isMinimized()) settingsWindow.restore(); settingsWindow.showInactive(); await wait(200);
     fs.writeFileSync(path.join(artifactDirectory, 'composer-alignment-settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     composerSample.at = Date.now() - 4000; positionOverlay();
     if (overlay.isVisible()) throw new Error('Stale composer kept an overlay visible');
@@ -662,8 +680,9 @@ async function smokeDocking() {
     if (overlay.isVisible()) throw new Error('Docked bar leaked over another application');
     hostVisible = true; composerSample = null; positionOverlay();
     if (overlay.isVisible()) throw new Error('Missing composer reused previous position');
-    return { avoidsInput: true, controls: true, alignments, restoredAlignment, titlebarChecks, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
+    return { avoidsInput: true, controls: true, alignments, restoredAlignment, titlebarChecks, hiddenRegionRecovered, staleHidden: true, freshRecovered: true, otherAppHidden: true, missingInputHidden: true };
   } finally {
+    overlay.webContents.setBackgroundThrottling(false);
     settings.update(saved.value); ({ lastHost, hostVisible, hostHandle, composerSample, overlaySize, manuallyHidden } = saved);
     publish(); positionOverlay();
   }

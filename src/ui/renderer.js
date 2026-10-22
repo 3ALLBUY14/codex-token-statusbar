@@ -1,6 +1,7 @@
 'use strict';
 const api = window.codexStatusbar;
 const $ = id => document.getElementById(id);
+const snapshotGuard = new SnapshotGuard();
 let snapshot = null;
 let detailsOpen = false;
 let dragPointer = null;
@@ -93,14 +94,16 @@ function fitMetrics() {
 }
 
 function measure() {
-  requestAnimationFrame(() => {
+  const update = () => {
     fitMetrics();
     const zoom = Number(document.body.style.zoom) || 1;
     const width = Math.ceil((Math.max($('bar').offsetWidth, detailsOpen ? $('details').offsetWidth : 0) + 16) * zoom);
     const height = Math.ceil($('shell').getBoundingClientRect().height);
     const size = `${width}x${height}`;
     if (size !== lastResize) { lastResize = size; api.resize(width, height, Math.ceil(($('bar').offsetHeight + ($('shell').classList.contains('titlebar') ? 4 : 16)) * zoom)); }
-  });
+  };
+  // Hidden docked windows must measure before they can become visible again.
+  if (document.hidden) update(); else requestAnimationFrame(update);
 }
 function detailVisibility(open) {
   detailsOpen = open;
@@ -110,11 +113,13 @@ function detailVisibility(open) {
 }
 
 function render(state) {
+  if (!snapshotGuard.accept(state)) return;
   if (detailContext !== state.selection.threadId) {
     for (const item of document.querySelectorAll('.detail-extra')) item.open = false;
     detailContext = state.selection.threadId;
   }
   snapshot = state;
+  renderUsageDetails($('usage-details'), state.session);
   const s = state.session;
   const settings = state.settings;
   applyOpacity();
@@ -176,6 +181,7 @@ function render(state) {
     ? `平均速度＝上一轮输出 Token ÷ ${s.lastTurn.speed.excludesFirstToken ? '（轮次耗时－首 Token 延迟）' : '轮次耗时'}。包含推理输出、工具执行和多次模型调用，不能代表纯生成速度。`
     : '完成一轮并记录输出 Token 与耗时后显示平均速度。它包含工具执行和多次模型调用，不能代表纯生成速度。';
   const notes = [];
+  if (s?.accounting?.partial) notes.push('当前仅展示可核实的已记录用量，历史范围不完整或存在响应冲突；详见“用量来源与模型”。');
   if (dragError) notes.push(dragError);
   if (state.selection.mode === 'recent') notes.push('正在重新识别当前聊天，暂显示最近活跃聊天。');
   if (state.selection.mode === 'ambiguous') notes.push('多个窗口或同名聊天无法唯一识别，请在设置中选择并锁定聊天。');

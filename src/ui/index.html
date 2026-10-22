@@ -47,12 +47,15 @@
         <div><span>推理输出 <small>已包含在输出中</small></span><strong id="reasoning-detail">—</strong></div>
         <div><span>上一轮耗时 / 首 Token</span><strong id="time-detail">—</strong></div>
       </div></details>
+      <details class="detail-extra" id="detail-usage"><summary>用量来源与模型</summary><div id="usage-details"></div></details>
       <details class="detail-extra" id="detail-tools"><summary>工具分类</summary><div class="tool-breakdown" id="turn-tool-breakdown"></div><div class="tool-breakdown" id="tool-breakdown"></div></details>
       <details class="detail-extra" id="detail-explanation"><summary>指标说明</summary><p class="speed-note" id="speed-note">平均速度包含工具执行和多次模型调用，不能代表纯生成速度。</p></details>
       <p class="state-note" id="state-note"></p>
       <div class="detail-footer"><span id="updated">只读本地日志</span><button class="btn" data-action="refresh">刷新</button></div>
     </section>
   </main>
+  <script src="snapshot-guard.js"></script>
+  <script src="usage-details.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

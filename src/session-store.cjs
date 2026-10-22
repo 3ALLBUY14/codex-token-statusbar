@@ -8,7 +8,8 @@ const { EventEmitter } = require('node:events');
 const { SessionAccumulator, JsonlDecoder, emptyUsage, localDay } = require('./metrics.cjs');
 const { UUID } = require('./codex-ipc.cjs');
 const { StatisticsCache, fingerprint } = require('./statistics-cache.cjs');
-const CACHE_VERSION = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'metrics.cjs'))).update('snapshot-v1:' + Intl.DateTimeFormat().resolvedOptions().timeZone).digest('hex');
+const { ResponseLedger, buildUsageIndex, accountingFor } = require('./response-usage.cjs');
+const CACHE_VERSION = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'metrics.cjs'))).update(fs.readFileSync(path.join(__dirname, 'response-usage.cjs'))).update('snapshot-v2:' + Intl.DateTimeFormat().resolvedOptions().timeZone).digest('hex');
 
 const CHUNK = 256 * 1024;
 const MAX_PASS_BYTES = 64 * 1024 * 1024;
@@ -25,7 +26,8 @@ class FileTail {
     this.fingerprint = null;
     this.complete = false;
     this.accumulator = new SessionAccumulator();
-    this.decoder = new JsonlDecoder(line => this.accumulator.processLine(line));
+    this.ledger = new ResponseLedger();
+    this.decoder = new JsonlDecoder(line => this.ledger.feed(this.accumulator.processLine(line)));
     this.cachedSnapshots = new Map();
   }
   async refresh(budget = MAX_PASS_BYTES) {
@@ -39,7 +41,7 @@ class FileTail {
         if (stat.size === saved.size && stat.mtimeMs === saved.mtimeMs && identity === saved.identity && await fingerprint(handle, stat.size) === saved.fingerprint) {
           this.offset = stat.size; this.mtimeMs = stat.mtimeMs; this.identity = identity; this.fingerprint = saved.fingerprint; this.complete = true;
           this.decoder.skippedLines = saved.skippedLines;
-          Object.assign(this.accumulator, { id: saved.snapshot.threadId, model: saved.snapshot.model, source: saved.isRootDesktop ? 'desktop' : null, totals: saved.snapshot.totals, hasUsage: saved.snapshot.hasUsage, accountingWarning: saved.snapshot.accountingWarning, usageIncomplete: saved.snapshot.usageIncomplete, daily: new Map(saved.daily) });
+          Object.assign(this.accumulator, { id: saved.snapshot.threadId, parentId: saved.parentId ?? null, model: saved.snapshot.model, source: saved.isRootDesktop ? 'desktop' : null, totals: saved.snapshot.totals, hasUsage: saved.snapshot.hasUsage, accountingWarning: saved.snapshot.accountingWarning, usageIncomplete: saved.snapshot.usageIncomplete, daily: new Map(saved.daily) });
           return { consumed: 0, pending: false, error: null, cacheHit: true };
         }
         // A snapshot cannot resume parsing. Rebuild only the changed file.
@@ -86,8 +88,10 @@ class FileTail {
   }
   checkpoint() {
     if (this.saved && this.complete) return this.saved;
+    // Response identities must be replayed for cross-file deduplication.
+    if (this.ledger.records.size || this.ledger.invalid || this.ledger.limited) return null;
     if (!this.complete || !this.fingerprint || this.accumulator.activeTurn || !UUID.test(this.accumulator.id ?? '')) return null;
-    return { size: this.offset, mtimeMs: this.mtimeMs, identity: this.identity, fingerprint: this.fingerprint, snapshot: this.snapshot(), isRootDesktop: this.accumulator.isRootDesktop, daily: [...this.accumulator.daily], skippedLines: this.decoder.skippedLines };
+    return { size: this.offset, mtimeMs: this.mtimeMs, identity: this.identity, fingerprint: this.fingerprint, snapshot: this.snapshot(), parentId: this.accumulator.parentId, isRootDesktop: this.accumulator.isRootDesktop, daily: [...this.accumulator.daily], skippedLines: this.decoder.skippedLines };
   }
 }
 
@@ -231,12 +235,16 @@ class SessionStore extends EventEmitter {
   }
   snapshot(settings = {}, ipc = {}, { includeRecords = true, includeSessions = true } = {}) {
     const sessions = this.sessions();
+    if (this.usageIndexRevision !== this.revision || !this.usageIndex) { this.usageIndex = buildUsageIndex(this.files.values(), sessions); this.usageIndexRevision = this.revision; this.accountingCache = new Map(); }
+    const usageIndex = this.usageIndex;
     const day = localDay(Date.now());
     const today = emptyUsage();
     for (const tail of sessions) {
-      const bucket = tail.accumulator.daily.get(day);
+      const bucket = usageIndex.groups.get(tail.accumulator.id)?.daily.get(day) ?? (!usageIndex.groups.has(tail.accumulator.id) ? tail.accumulator.daily.get(day) : null);
       if (bucket) for (const key of Object.keys(today)) today[key] += bucket[key];
     }
+    const known = new Set(sessions.map(t => t.accumulator.id));
+    for (const [id, group] of usageIndex.groups) if (!known.has(id)) { const bucket = group.daily.get(day); if (bucket) for (const key of Object.keys(today)) today[key] += bucket[key]; }
     let mode = 'unbound';
     let selectedId = null;
     let selected;
@@ -256,10 +264,20 @@ class SessionStore extends EventEmitter {
       mode = selected ? 'recent' : 'unbound';
     }
     selected ??= selectedId ? sessions.find(tail => tail.accumulator.id === selectedId) : null;
+    const session = selected ? structuredClone(selected.snapshot(includeRecords)) : null;
+    if (session) {
+      if (!this.accountingCache.has(selectedId)) this.accountingCache.set(selectedId, accountingFor(selectedId, usageIndex, sessions));
+      session.accounting = structuredClone(this.accountingCache.get(selectedId));
+      if (session.accounting.method === 'response') {
+        session.totals = { ...session.accounting.totals }; session.hasUsage = session.accounting.requests > 0;
+        if (session.accounting.updatedAt && (!session.updatedAt || Date.parse(session.accounting.updatedAt) > Date.parse(session.updatedAt))) session.updatedAt = session.accounting.updatedAt;
+        session.cacheHitPercent = session.totals.input_tokens ? session.totals.cached_input_tokens * 100 / session.totals.input_tokens : null;
+      }
+    }
     return {
-      session: selected ? structuredClone(selected.snapshot(includeRecords)) : null,
+      session,
       selection: { mode, threadId: selectedId, source: ipc.source ?? null, confidence: mode === 'pinned' ? 'manual' : ipc.confidence ?? 'unknown', reason: ipc.reason ?? null, connected: Boolean(ipc.connected), routeCount: ipc.routeCount ?? 0 },
-      today: { day, usage: today, partial: this.indexing || this.truncated || this.readErrors > 0 || sessions.some(tail => tail.accumulator.accountingWarning || tail.accumulator.usageIncomplete || tail.decoder.skippedLines > 0) },
+      today: { day, usage: today, partial: this.indexing || this.truncated || this.readErrors > 0 || usageIndex.bad.size > 0 || [...usageIndex.groups.values()].some(g => g.partial) || sessions.some(tail => tail.accumulator.accountingWarning || tail.accumulator.usageIncomplete || tail.decoder.skippedLines > 0) },
       sessions: includeSessions ? sessions.filter(tail => tail.accumulator.isRootDesktop).map(tail => ({
         id: tail.accumulator.id,
         model: tail.accumulator.model,
