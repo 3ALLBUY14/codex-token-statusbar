@@ -563,6 +563,7 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 600));
   const narrow = await overlay.webContents.executeJavaScript(`({ compact: document.getElementById('shell').classList.contains('compact'), hidden: document.querySelectorAll('.metric.overflowed').length, extraHidden: document.querySelectorAll('.metric.overflowed[data-metric=today], .metric.overflowed[data-metric=cache]').length, more: document.getElementById('more-count').textContent, barFits: document.getElementById('bar').scrollWidth <= document.getElementById('bar').clientWidth + 1, metricsFit: document.getElementById('metrics').scrollWidth <= document.getElementById('metrics').clientWidth + 1, detailsList: document.getElementById('overflow-list').children.length, visibleMetrics: document.querySelectorAll('.metric:not([hidden]):not(.overflowed)').length })`);
   const overflowActions = await overlay.webContents.executeJavaScript(`(async () => {
+    document.getElementById('tab-overview').click();
     const button = document.querySelector('[data-action=details]'), panel = document.getElementById('details'), badge = document.getElementById('more-count');
     if (panel.classList.contains('open')) button.click();
     await new Promise(resolve => requestAnimationFrame(resolve));
