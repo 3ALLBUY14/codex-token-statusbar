@@ -41,7 +41,8 @@ test('changed, replaced, truncated and partial logs are rebuilt rather than trus
   assert.equal((await fs.stat(f.file)).mtimeMs, stat.mtimeMs);
   const warm = f.create(); await warm.scan(); assert.equal(warm.cacheHits, 0); assert.equal(warm.snapshot().session.totals.input_tokens, 200);
   await fs.writeFile(f.file, event('session_meta', { id, source: 'desktop' }) + tokens(5)); await warm.scan();
-  assert.equal(warm.snapshot().session.totals.input_tokens, 5);
+  assert.equal(warm.files.get(f.file).accumulator.totals.input_tokens, 5);
+  assert.equal(warm.snapshot().session.totals.input_tokens, 200); // Rebuilt file, retained same-chat cumulative history.
   await fs.appendFile(f.file, '{"unfinished":"private'); await warm.scan();
   assert.equal(warm.files.get(f.file).checkpoint(), null);
 });

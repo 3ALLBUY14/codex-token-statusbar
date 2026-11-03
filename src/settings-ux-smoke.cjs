@@ -19,6 +19,8 @@ async function checkSettingsUx({ win, overlay, settings, publish, artifactDirect
     assert.equal(await ui('document.getElementById("advanced-position").open'), false);
     const result = await view(`(() => {
       const outer = document.getElementById('details');
+      const toggle=document.querySelector('[data-action=details]');if(toggle.getAttribute('aria-expanded')!=='true')toggle.click();
+      document.getElementById('tab-overview').click();
       const collapsed = [...document.querySelectorAll('.detail-extra')].every(item => !item.open);
       const primarySummary = outer.innerText.includes('会话累计') && outer.innerText.includes('86,420') && !outer.innerText.includes('输入 Token');
       document.querySelector('#detail-tokens > summary').click();

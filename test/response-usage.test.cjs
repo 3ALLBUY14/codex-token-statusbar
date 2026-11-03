@@ -37,15 +37,15 @@ test('related child usage is deduped across parent copies and child files withou
 });
 test('conflicting, malformed and incomplete records are visible, never added twice or silently called complete', async t => {
   const { store } = await fixture(t, { one: meta(root) + response(root, 'bad', 100) + response(root, 'bad', 200) + response(root, 'valid', 300, { thread_token_usage: usage(1000) }) + response(root, 'invalid', -1) });
-  const s = snapshot(store); assert.equal(s.session.totals.total_tokens, 310); assert.equal(s.session.accounting.requests, 1); assert.equal(s.session.accounting.partial, true); assert.equal(s.today.partial, true);
-  assert.equal(diagnosticState({ ...s, runtime: { testMode: true } }).code, 'usage-partial');
+  const s = snapshot(store); assert.equal(s.session.totals.total_tokens, 1010); assert.equal(s.session.accounting.recordedTotals.total_tokens, 310); assert.equal(s.session.accounting.unassignedTokens, 700); assert.equal(s.session.accounting.requests, 1); assert.equal(s.session.accounting.partial, true); assert.equal(s.today.partial, true);
+  assert.equal(diagnosticState({ ...s, runtime: { testMode: true } }).code, 'usage-history');
   assert.equal([...store.files.values()][0].checkpoint(), null);
 });
 test('new-format-only logs update incrementally and late legacy events never overwrite response totals', async t => {
   const { store, directory } = await fixture(t, { one: meta(root) + response(root, 'r1', 10) });
   await fs.appendFile(path.join(directory, 'sessions/one.jsonl'), response(root, 'r2', 20) + event('event_msg', { type: 'token_count', info: { total_token_usage: usage(999), last_token_usage: usage(999) } })); await store.scan();
-  assert.equal(snapshot(store).session.totals.total_tokens, 50); assert.equal(snapshot(store).session.accounting.requests, 2);
-  store.stop(); const fresh = new SessionStore(directory, { cacheDirectory: path.join(directory, 'cache') }); t.after(() => fresh.stop()); await fresh.scan(); assert.equal(snapshot(fresh).session.totals.total_tokens, 50);
+  assert.equal(snapshot(store).session.totals.total_tokens, 1009); assert.equal(snapshot(store).session.accounting.recordedTotals.total_tokens, 50); assert.equal(snapshot(store).session.accounting.requests, 2);
+  store.stop(); const fresh = new SessionStore(directory, { cacheDirectory: path.join(directory, 'cache') }); t.after(() => fresh.stop()); await fresh.scan(); assert.equal(snapshot(fresh).session.totals.total_tokens, 1009);
 });
 test('a clean copy cannot hide conflicting response evidence, and disputed model names stay unassigned', async t => {
   const { store } = await fixture(t, {
@@ -58,6 +58,38 @@ test('a clean copy cannot hide conflicting response evidence, and disputed model
 test('review attribution requires source evidence; missing model names stay unknown', async t => {
   const { store } = await fixture(t, { one: meta(root) + response(root, 'r1', 10, { thread_source: 'auto_review' }) }); const report = snapshot(store).session.accounting;
   assert.equal(report.bySource[0].source, 'review'); assert.equal(report.byModel[0].model, '模型未记录');
+});
+test('switching models in one chat preserves cumulative checkpoints and separates unassigned history', async t => {
+  const { store, directory } = await fixture(t, { one: meta(root) + event('turn_context', { model: 'model-A' }) + event('event_msg', { type: 'token_count', info: { total_token_usage: usage(1000), last_token_usage: usage(100) } }) + response(root, 'a1', 100, { model: 'model-A', thread_token_usage: usage(1000) }) });
+  assert.equal(snapshot(store).session.totals.total_tokens, 1010);
+  await fs.appendFile(path.join(directory, 'sessions/one.jsonl'), event('event_msg', { type: 'thread_settings_applied', thread_id: root, thread_settings: { model: 'model-B' } }) + response(root, 'b1', 200, { model: 'model-B', thread_token_usage: { ...usage(1200), output_tokens: 20, total_tokens: 1220 } })); await store.scan();
+  const s = snapshot(store); assert.equal(s.session.model, 'model-B'); assert.equal(s.session.totals.total_tokens, 1220);
+  assert.equal(s.session.accounting.recordedTotals.total_tokens, 320); assert.equal(s.session.accounting.unassignedTokens, 900);
+  assert.equal(s.session.accounting.byModel.find(x => x.model === 'model-A').total_tokens, 110);
+  assert.equal(s.session.accounting.byModel.find(x => x.model === 'model-B').total_tokens, 210);
+  assert.equal(s.session.accounting.byModel.reduce((n, row) => n + row.total_tokens, 0), 1220);
+  assert.equal(s.today.usage.total_tokens, 320); // Historical carry-over is never today's new usage.
+  assert.equal(s.session.accounting.activity.days.reduce((n,row)=>n+row.tokens,0),320);
+  assert.equal(s.session.accounting.activity.partial,true);
+  const other = store.snapshot({}, { threadId: child, viewKnown: true }); assert.equal(other.session, null);
+  store.stop(); const fresh = new SessionStore(directory); t.after(() => fresh.stop()); await fresh.scan(); assert.equal(snapshot(fresh).session.totals.total_tokens, 1220);
+});
+test('same-chat paginated logs and a small new model counter cannot erase previously observed totals', async t => {
+  const { store, directory } = await fixture(t, {
+    original: meta(root) + event('event_msg', { type: 'token_count', info: { total_token_usage: usage(1000), last_token_usage: usage(100) } }),
+    resumed: meta(root) + event('turn_context', { model: 'model-B' }) + response(root, 'new', 10, { model: 'model-B' }),
+    independent: meta(child) + response(child, 'separate', 20, { model: 'model-C' }),
+  }); assert.equal(snapshot(store).session.totals.total_tokens, 1010);
+  assert.equal(store.snapshot({}, { threadId: child }).session.totals.total_tokens, 30);
+  await fs.writeFile(path.join(directory, 'sessions/original.jsonl'), meta(root)); await store.scan();
+  assert.equal(snapshot(store).session.totals.total_tokens, 1010);
+  assert.equal(snapshot(store).session.accounting.unassignedTokens, 990);
+});
+test('model counter inconsistencies never fabricate component totals to match a historical checkpoint', async t => {
+  const { store } = await fixture(t, { one: meta(root) + event('event_msg', { type: 'token_count', info: { total_token_usage: usage(1000), last_token_usage: usage(1000) } }) + response(root, 'a', 10) + response(root, 'b', 20) });
+  const s = snapshot(store); assert.equal(s.session.totals.total_tokens, 1010);
+  const unassigned = s.session.accounting.byModel.find(x => x.model.includes('历史未归属'));
+  assert.equal(unassigned.total_tokens, 960); assert.equal(unassigned.input_tokens, null); assert.equal(unassigned.output_tokens, null);
 });
 test('snapshot ordering rejects stale chats, mismatched data, old epochs and duplicate deliveries', () => {
   const guard = new SnapshotGuard(), state = (id, sequence, epoch) => ({ selection: { threadId: id }, session: { threadId: id }, delivery: { sequence, epoch } });

@@ -29,9 +29,10 @@
     <section class="panel details" id="details" aria-label="用量明细">
       <div class="detail-heading"><div><strong>当前聊天</strong><span class="pver" id="binding">等待数据</span></div><span class="dim">点击 C 收起</span></div>
       <p class="chat-title" id="chat-title" hidden></p>
-      <div class="model-line"><span id="model">—</span><span class="dim" id="thread">—</span></div>
+      <div class="model-line"><span id="model">—</span><div class="detail-page-tabs" role="tablist" aria-label="用量视图"><button id="tab-overview" role="tab" aria-selected="true" aria-controls="overview-panel">总览</button><button id="tab-models" role="tab" aria-selected="false" tabindex="-1" aria-controls="models-panel">模型</button><button id="tab-activity" role="tab" aria-selected="false" tabindex="-1" aria-controls="activity-panel">活动</button></div><span class="dim" id="thread">—</span></div>
+      <div id="overview-panel" role="tabpanel" aria-labelledby="tab-overview">
       <div class="numbers">
-        <div><span>会话累计 <small>输入＋输出</small></span><strong id="total-detail">—</strong></div>
+        <div><span>会话累计 <small>跨模型 · 输入＋输出</small></span><strong id="total-detail">—</strong></div>
         <div><span>上下文 <small id="context-origin">最新调用</small></span><strong id="context-detail">—</strong></div>
         <div><span id="turn-total-label">上轮 Token</span><strong id="turn-total-detail">—</strong></div>
         <div><span>上一轮平均输出速度</span><strong id="speed-detail">—</strong></div>
@@ -51,11 +52,28 @@
       <details class="detail-extra" id="detail-tools"><summary>工具分类</summary><div class="tool-breakdown" id="turn-tool-breakdown"></div><div class="tool-breakdown" id="tool-breakdown"></div></details>
       <details class="detail-extra" id="detail-explanation"><summary>指标说明</summary><p class="speed-note" id="speed-note">平均速度包含工具执行和多次模型调用，不能代表纯生成速度。</p></details>
       <p class="state-note" id="state-note"></p>
+      </div>
+      <div id="models-panel" role="tabpanel" aria-labelledby="tab-models" hidden>
+        <div class="model-picker" id="model-picker" role="tablist" aria-label="已记录模型"></div>
+        <p class="model-page-meta" id="model-page-meta"></p>
+        <p class="settings-note" id="model-page-empty" hidden>当前聊天尚无可展示的模型记录。</p>
+        <div class="numbers" id="model-page-numbers" role="tabpanel" aria-label="选中模型用量">
+          <div><span>模型累计 <small>输入＋输出</small></span><strong id="model-total">—</strong></div>
+          <div><span>输入 Token</span><strong id="model-input">—</strong></div>
+          <div><span>缓存输入 <small>已包含在输入中</small></span><strong id="model-cached">—</strong></div>
+          <div><span>输出 Token</span><strong id="model-output">—</strong></div>
+          <div><span>推理输出 <small>已包含在输出中</small></span><strong id="model-reasoning">—</strong></div>
+          <div><span>已记录请求</span><strong id="model-requests">—</strong></div>
+        </div>
+        <p class="settings-note model-page-note">各页仅展示当前聊天中可归属的模型用量，切页不改变浮条累计。当前上下文、轮次速度与工具记录在总览中查看。</p>
+      </div>
+      <div id="activity-panel" role="tabpanel" aria-labelledby="tab-activity" hidden><div id="activity-chart"></div><p class="settings-note">当前聊天近一年的每日 Token 用量，汇总该聊天的全部模型。仅按日志中可归属日期的记录统计，历史未归属用量不摊入日历；无记录的日期不代表实际未使用。</p></div>
       <div class="detail-footer"><span id="updated">只读本地日志</span><button class="btn" data-action="refresh">刷新</button></div>
     </section>
   </main>
   <script src="snapshot-guard.js"></script>
   <script src="usage-details.js"></script>
+  <script src="activity-grid.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

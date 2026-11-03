@@ -37,6 +37,7 @@ function diagnosticState(state) {
   if (h.readErrors) return { code: 'read-retrying', label: '日志读取受限', detail: '保留已读取结果并自动重试，统计可能不完整。' };
   if (h.indexing) return { code: 'indexing', label: '正在读取历史记录', detail: '当前显示已读取部分，读取完成后自动更新。' };
   if (!s.session) return { code: 'waiting-data', label: selection.threadId ? '已识别聊天，等待日志' : '等待聊天', detail: selection.threadId ? '当前聊天尚无可读取的本地用量记录，不沿用上一聊天的数据。' : '进入一个已有记录的聊天后自动更新。' };
+  if (s.session.accounting?.unassignedTokens > 0) return { code: 'usage-history', label: '累计已保留，历史归属不完整', detail: '累计记录保留历史总量；模型页按逐请求记录拆分，历史差额单列，不重复相加。' };
   if (s.session.accounting?.partial) return { code: 'usage-partial', label: '已记录范围不完整', detail: '部分历史或响应记录缺失、冲突；用量明细仅展示可核实记录。' };
   if (h.cacheError) return { code: 'cache-fallback', label: '已直接读取日志', detail: '统计缓存暂不可用，当前结果来自日志，后续启动可能较慢。' };
   if (!selection.connected) return { code: 'ipc-retrying', label: '聊天连接恢复中', detail: 'IPC 正在重试；页面路径和标题识别仍可独立工作。' };

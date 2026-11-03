@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const names = { task: '主任务', subagent: '子代理', review: '自动审查', unknown: '来源未记录' };
+  const names = { task: '主任务', subagent: '子代理', review: '自动审查', unknown: '来源未记录', history: '历史未归属' };
   const count = n => Number.isFinite(n) ? n.toLocaleString('zh-CN') : '未记录';
   function node(tag, value, className) { const n = document.createElement(tag); if (value !== undefined) n.textContent = value; if (className) n.className = className; return n; }
   globalThis.renderUsageDetails = (container, session) => {
@@ -20,7 +20,8 @@
       const report = scope.value === 'related' ? data.related : data;
       body.replaceChildren();
       body.append(node('p', `${data.method === 'response' ? '逐请求记录优先，按响应标识去重' : '旧格式累计记录，模型归属不补猜'}。${report.partial ? '统计范围不完整或存在冲突，仅展示可核实记录。' : '以下为本机已记录范围，不等同于账单。'}`, 'settings-note'));
-      body.append(node('p', `已记录用量 ${count(report.totals.total_tokens)} Token · 请求 ${count(report.requests)}`, 'usage-total'));
+      body.append(node('p', `已记录用量 ${count(report.totals.total_tokens)} Token · 已记录请求 ${count(report.requests)}`, 'usage-total'));
+      if (report.unassignedTokens > 0) body.append(node('p', `其中历史未归属 ${count(report.unassignedTokens)} Token，已计入会话累计，不重复相加；模型明细仅覆盖有逐请求记录的部分。`, 'settings-note'));
       const sources = node('div', undefined, 'usage-sources');
       for (const row of report.bySource) {
         const line = node('div'), pct = report.totals.total_tokens ? row.total_tokens * 100 / report.totals.total_tokens : 0;

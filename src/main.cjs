@@ -422,7 +422,7 @@ async function smokeCheck() {
   await new Promise(resolve => setTimeout(resolve, 500));
   const bar = await overlay.webContents.capturePage();
   fs.writeFileSync(path.join(artifactDirectory, 'statusbar.png'), bar.toPNG());
-  await overlay.webContents.executeJavaScript("document.querySelector('[data-action=details]').click()");
+  await overlay.webContents.executeJavaScript("(() => {const b=document.querySelector('[data-action=details]');if(b.getAttribute('aria-expanded')!=='true')b.click();})()");
   await new Promise(resolve => setTimeout(resolve, 500));
   const expanded = await overlay.webContents.capturePage();
   fs.writeFileSync(path.join(artifactDirectory, 'details.png'), expanded.toPNG());

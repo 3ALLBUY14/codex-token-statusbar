@@ -3,12 +3,33 @@ const { usageOf, emptyUsage, localDay } = require('./metrics.cjs');
 const { UUID } = require('./codex-ipc.cjs');
 const label = value => typeof value === 'string' && value.length > 0 && value.length <= 128 ? value : null;
 const feature = source => /auto_review|guardian_review/.test(typeof source === 'string' ? source : '') ? 'review' : source && typeof source === 'object' && source.subagent ? 'subagent' : null;
-const add = (to, from) => { for (const key of Object.keys(emptyUsage())) to[key] += from[key]; };
+const add = (to, from) => { for (const key of Object.keys(emptyUsage())) to[key] = to[key] === null || from[key] === null ? null : to[key] + from[key]; };
+function cumulativeFloor(...values) {
+  let total = null;
+  for (const value of values) if (value && Number.isSafeInteger(value.total_tokens) && (!total || value.total_tokens > total.total_tokens)) total = value;
+  return total ? { ...total } : null;
+}
+function retainHistory(report, baseline) {
+  const recorded = { ...report.totals }, total = cumulativeFloor(recorded, baseline) ?? recorded;
+  const history = emptyUsage();
+  history.total_tokens = total.total_tokens - recorded.total_tokens;
+  if (total.input_tokens >= recorded.input_tokens && total.output_tokens >= recorded.output_tokens) {
+    history.input_tokens = total.input_tokens - recorded.input_tokens; history.output_tokens = total.output_tokens - recorded.output_tokens;
+    history.cached_input_tokens = total.cached_input_tokens >= recorded.cached_input_tokens ? Math.min(history.input_tokens, total.cached_input_tokens - recorded.cached_input_tokens) : null;
+    history.reasoning_output_tokens = total.reasoning_output_tokens >= recorded.reasoning_output_tokens ? Math.min(history.output_tokens, total.reasoning_output_tokens - recorded.reasoning_output_tokens) : null;
+  } else { history.input_tokens = history.output_tokens = history.cached_input_tokens = history.reasoning_output_tokens = null; }
+  if (history.total_tokens) {
+    report.byModel.push({ model: '历史未归属（累计记录）', ...history, requests: null });
+    report.bySource.push({ source: 'history', ...history, requests: null }); report.partial = true;
+  }
+  return { ...report, totals: total, recordedTotals: recorded, unassignedTokens: history.total_tokens };
+}
 function mergeResponse(old, record) {
   if (!old || old.owned !== record.owned) return { ...(!old || record.owned ? record : old) };
   const merged = { ...old, conflict: Boolean(old.conflict || record.conflict || JSON.stringify(old.usage) !== JSON.stringify(record.usage)) };
   if (old.model && record.model && old.model !== record.model) { merged.model = null; merged.modelAmbiguous = true; }
   else if (!old.model && !old.modelAmbiguous) merged.model = record.model;
+  if ((record.cumulative?.total_tokens ?? 0) > (merged.cumulative?.total_tokens ?? 0)) merged.cumulative = record.cumulative;
   return merged;
 }
 class ResponseLedger {
@@ -41,12 +62,16 @@ class ResponseLedger {
   }
 }
 function buildUsageIndex(files, sessions) {
-  const records = new Map(), bad = new Map(), parents = new Map(), groups = new Map();
+  const records = new Map(), bad = new Map(), parents = new Map(), groups = new Map(), legacyTotals = new Map();
   for (const tail of sessions) {
     const id = tail.accumulator.id, parent = tail.accumulator.parentId;
     if (UUID.test(parent ?? '')) parents.set(id, parent);
   }
   for (const tail of files) {
+    if (tail.accumulator.hasUsage && UUID.test(tail.accumulator.id ?? '')) {
+      const previous = legacyTotals.get(tail.accumulator.id);
+      legacyTotals.set(tail.accumulator.id, cumulativeFloor(previous, tail.accumulator.totals) ?? previous ?? tail.accumulator.totals);
+    }
     const ledger = tail.ledger;
     if (ledger.invalid || ledger.limited) bad.set(ledger.owner, true);
     for (const [key, record] of ledger.records) {
@@ -56,9 +81,12 @@ function buildUsageIndex(files, sessions) {
   }
   for (const record of records.values()) {
     let group = groups.get(record.thread);
-    if (!group) { group = { totals: emptyUsage(), byModel: new Map(), bySource: new Map(), daily: new Map(), requests: 0, partial: Boolean(bad.get(record.thread)), cumulative: 0, updatedAt: null }; groups.set(record.thread, group); }
-    group.cumulative = Math.max(group.cumulative, record.cumulative?.total_tokens ?? 0);
+    if (!group) { group = { totals: emptyUsage(), byModel: new Map(), bySource: new Map(), daily: new Map(), requests: 0, partial: Boolean(bad.get(record.thread)), cumulative: 0, checkpoint: null, updatedAt: null }; groups.set(record.thread, group); }
     if (record.conflict) { group.partial = true; continue; }
+    if (record.cumulative && ['input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_output_tokens'].every(k => record.cumulative[k] >= record.usage[k])) {
+      group.checkpoint = cumulativeFloor(group.checkpoint, record.cumulative) ?? group.checkpoint;
+      group.cumulative = group.checkpoint?.total_tokens ?? 0;
+    }
     if (!Number.isSafeInteger(group.totals.total_tokens + record.usage.total_tokens)) { group.partial = true; continue; }
     add(group.totals, record.usage); group.requests++;
     if (record.timestamp && (!group.updatedAt || Date.parse(record.timestamp) > Date.parse(group.updatedAt))) group.updatedAt = record.timestamp;
@@ -67,28 +95,37 @@ function buildUsageIndex(files, sessions) {
     if (record.day) { const day = group.daily.get(record.day) ?? emptyUsage(); add(day, record.usage); group.daily.set(record.day, day); } else group.partial = true;
   }
   for (const group of groups.values()) group.partial ||= group.cumulative !== 0 && group.cumulative !== group.totals.total_tokens;
-  return { groups, parents, bad };
+  return { groups, parents, bad, legacyTotals };
 }
-function accountingFor(id, index, sessions) {
+function accountingFor(id, index, sessions, previousTotals = new Map()) {
   const tails = new Map(sessions.map(t => [t.accumulator.id, t]));
   function own(thread) {
     const modern = index.groups.get(thread), legacy = tails.get(thread)?.snapshot(false);
-    if (modern) return { method: 'response', totals: { ...modern.totals }, requests: modern.requests, updatedAt: modern.updatedAt, partial: modern.partial || Boolean(legacy?.totals.total_tokens > modern.totals.total_tokens), byModel: [...modern.byModel].map(([model, usage]) => ({ model, ...usage })), bySource: [...modern.bySource].map(([source, usage]) => ({ source, ...usage })) };
     const source = index.parents.has(thread) ? 'subagent' : 'task';
-    return { method: 'legacy', totals: { ...(legacy?.totals ?? emptyUsage()) }, requests: null, partial: Boolean(index.bad.get(thread) || legacy?.usageIncomplete || legacy?.accountingWarning), byModel: legacy?.hasUsage ? [{ model: '旧格式未按模型归属', ...legacy.totals, requests: null }] : [], bySource: legacy?.hasUsage ? [{ source, ...legacy.totals, requests: null }] : [] };
+    const report = modern
+      ? { method: 'response', totals: { ...modern.totals }, requests: modern.requests, updatedAt: modern.updatedAt, partial: modern.partial, byModel: [...modern.byModel].map(([model, usage]) => ({ model, ...usage })), bySource: [...modern.bySource].map(([source, usage]) => ({ source, ...usage })) }
+      : { method: 'legacy', totals: { ...(legacy?.totals ?? emptyUsage()) }, requests: null, partial: Boolean(index.bad.get(thread) || legacy?.usageIncomplete || legacy?.accountingWarning), byModel: legacy?.hasUsage ? [{ model: '旧格式未按模型归属', ...legacy.totals, requests: null }] : [], bySource: legacy?.hasUsage ? [{ source, ...legacy.totals, requests: null }] : [] };
+    // A model change must not replace the chat's cumulative total with a partial request ledger.
+    const result = retainHistory(report, cumulativeFloor(index.legacyTotals.get(thread), modern?.checkpoint, previousTotals.get(thread)));
+    previousTotals.set(thread, { ...result.totals });
+    return result;
   }
   const current = own(id), included = new Set([id]);
   for (const thread of new Set([...tails.keys(), ...index.groups.keys()])) {
     let cursor = thread; const seen = new Set();
     while (index.parents.has(cursor) && !seen.has(cursor)) { seen.add(cursor); cursor = index.parents.get(cursor); if (cursor === id) { included.add(thread); break; } }
   }
-  const related = { totals: emptyUsage(), requests: 0, partial: false, byModel: [], bySource: [] }, models = new Map(), sources = new Map();
+  const related = { totals: emptyUsage(), requests: 0, partial: false, unassignedTokens: 0, byModel: [], bySource: [] }, models = new Map(), sources = new Map();
   for (const thread of included) {
     const report = own(thread); if (!Number.isSafeInteger(related.totals.total_tokens + report.totals.total_tokens)) { related.partial = true; continue; } add(related.totals, report.totals); related.partial ||= report.partial;
+    related.unassignedTokens += report.unassignedTokens;
     related.requests = related.requests === null || report.requests === null ? null : related.requests + report.requests;
     for (const [rows, map, field] of [[report.byModel, models, 'model'], [report.bySource, sources, 'source']]) for (const row of rows) { const bucket = map.get(row[field]) ?? { [field]: row[field], ...emptyUsage(), requests: 0 }; add(bucket, row); bucket.requests = bucket.requests === null || row.requests === null ? null : bucket.requests + row.requests; map.set(row[field], bucket); }
   }
   related.byModel = [...models.values()].sort((a, b) => b.total_tokens - a.total_tokens); related.bySource = [...sources.values()].sort((a, b) => b.total_tokens - a.total_tokens);
-  return { ...current, related, relatedThreads: included.size - 1 };
+  const daily = index.groups.get(id)?.daily ?? tails.get(id)?.accumulator.daily ?? new Map();
+  const days = [...daily].map(([date, usage]) => ({ date, tokens: usage.total_tokens })).sort((a,b) => a.date.localeCompare(b.date));
+  const activity = { days, partial: current.partial || days.reduce((n,row) => n+row.tokens,0) < current.totals.total_tokens };
+  return { ...current, activity, related, relatedThreads: included.size - 1 };
 }
 module.exports = { ResponseLedger, buildUsageIndex, accountingFor };

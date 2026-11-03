@@ -134,6 +134,7 @@ class SessionStore extends EventEmitter {
     this.truncated = false;
     this.readErrors = 0;
     this.revision = 0;
+    this.cumulativeTotals = new Map();
     this.dirty = new Set();
     this.needsDiscovery = true;
     this.active = true;
@@ -266,10 +267,10 @@ class SessionStore extends EventEmitter {
     selected ??= selectedId ? sessions.find(tail => tail.accumulator.id === selectedId) : null;
     const session = selected ? structuredClone(selected.snapshot(includeRecords)) : null;
     if (session) {
-      if (!this.accountingCache.has(selectedId)) this.accountingCache.set(selectedId, accountingFor(selectedId, usageIndex, sessions));
+      if (!this.accountingCache.has(selectedId)) this.accountingCache.set(selectedId, accountingFor(selectedId, usageIndex, sessions, this.cumulativeTotals));
       session.accounting = structuredClone(this.accountingCache.get(selectedId));
-      if (session.accounting.method === 'response') {
-        session.totals = { ...session.accounting.totals }; session.hasUsage = session.accounting.requests > 0;
+      if (session.accounting.method === 'response' || session.accounting.unassignedTokens > 0) {
+        session.totals = { ...session.accounting.totals }; session.hasUsage = session.hasUsage || session.accounting.requests > 0 || session.totals.total_tokens > 0;
         if (session.accounting.updatedAt && (!session.updatedAt || Date.parse(session.accounting.updatedAt) > Date.parse(session.updatedAt))) session.updatedAt = session.accounting.updatedAt;
         session.cacheHitPercent = session.totals.input_tokens ? session.totals.cached_input_tokens * 100 / session.totals.input_tokens : null;
       }

@@ -12,6 +12,54 @@ let titlebarHeight = null;
 let lastResize = '';
 let opacityPreview = null;
 let detailContext = null;
+let detailPage = 'overview', selectedModel = null, modelPickerKey = '';
+const detailPages = ['overview', 'models', 'activity'];
+function chooseDetailPage(page) {
+  detailPage = page;
+  for (const name of detailPages) {
+    const selected = page === name;
+    $(`tab-${name}`).setAttribute('aria-selected', String(selected)); $(`tab-${name}`).tabIndex = selected ? 0 : -1;
+    $(`${name}-panel`).hidden = !selected;
+  }
+  measure();
+}
+function tabKeys(event, buttons) {
+  let index = buttons.indexOf(event.currentTarget);
+  if (event.key === 'ArrowRight') index = (index + 1) % buttons.length;
+  else if (event.key === 'ArrowLeft') index = (index + buttons.length - 1) % buttons.length;
+  else if (event.key === 'Home') index = 0;
+  else if (event.key === 'End') index = buttons.length - 1;
+  else return;
+  event.preventDefault(); buttons[index].click(); buttons[index].focus({ preventScroll: true });
+}
+for (const name of detailPages) {
+  $(`tab-${name}`).addEventListener('click', () => chooseDetailPage(name));
+  $(`tab-${name}`).addEventListener('keydown', event => tabKeys(event, detailPages.map(page => $(`tab-${page}`))));
+}
+function renderModelPage(session) {
+  const rows = [...(session?.accounting?.byModel ?? [])].sort((a, b) => b.total_tokens - a.total_tokens);
+  if (!rows.some(row => row.model === selectedModel)) selectedModel = rows.find(row => row.model === session?.model)?.model ?? rows[0]?.model ?? null;
+  const visible = rows.slice(0, 30);
+  for (const row of rows) if ((row.model === selectedModel || /历史未归属/.test(row.model)) && !visible.includes(row)) visible.push(row);
+  const key = JSON.stringify(visible.map(row => row.model));
+  if (key !== modelPickerKey) {
+    const focused = $('model-picker').contains(document.activeElement) ? document.activeElement.dataset.model : null;
+    modelPickerKey = key; $('model-picker').replaceChildren();
+    for (const row of visible) {
+      const button = document.createElement('button'); button.type = 'button'; button.dataset.model = row.model;
+      button.textContent = row.model; button.title = row.model; button.setAttribute('role', 'tab'); button.setAttribute('aria-controls', 'model-page-numbers');
+      button.addEventListener('click', () => { selectedModel = row.model; renderModelPage(snapshot?.session); measure(); });
+      button.addEventListener('keydown', event => tabKeys(event, [...$('model-picker').children])); $('model-picker').append(button);
+    }
+    if (focused) [...$('model-picker').children].find(button => button.dataset.model === focused)?.focus({ preventScroll: true });
+  }
+  for (const button of $('model-picker').children) { const selected = button.dataset.model === selectedModel; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; }
+  const row = rows.find(item => item.model === selectedModel);
+  $('model-page-empty').hidden = Boolean(row); $('model-page-numbers').hidden = !row;
+  $('tab-models').textContent = rows.length ? `模型 ${rows.filter(item => !/未归属|未记录/.test(item.model)).length}` : '模型';
+  $('model-page-meta').textContent = row ? `${row.model === session.model ? '当前模型' : /未归属|未记录/.test(row.model) ? '归属待确认' : '历史模型'} · ${row.model} · 占会话累计 ${session.totals.total_tokens ? (row.total_tokens * 100 / session.totals.total_tokens).toFixed(1) : '0.0'}%${rows.length > visible.length ? ' · 仅展示用量最多的 30 个模型' : ''}` : '';
+  for (const [id, field] of [['model-total', 'total_tokens'], ['model-input', 'input_tokens'], ['model-cached', 'cached_input_tokens'], ['model-output', 'output_tokens'], ['model-reasoning', 'reasoning_output_tokens'], ['model-requests', 'requests']]) $(id).textContent = row ? Number.isFinite(row[field]) ? number(row[field]) : '未记录' : '—';
+}
 function applyOpacity() {
   const value = opacityPreview ?? snapshot?.settings.opacity ?? 1;
   $('bar').style.setProperty('--bar-opacity', String(value));
@@ -117,8 +165,12 @@ function render(state) {
   if (detailContext !== state.selection.threadId) {
     for (const item of document.querySelectorAll('.detail-extra')) item.open = false;
     detailContext = state.selection.threadId;
+    selectedModel = null; modelPickerKey = ''; chooseDetailPage('overview');
   }
   snapshot = state;
+  renderModelPage(state.session);
+  const activity = state.session?.accounting?.activity;
+  renderActivityGrid($('activity-chart'), activity ? { ...activity, partial: activity.partial || state.health.indexing } : null, state.selection.threadId);
   renderUsageDetails($('usage-details'), state.session);
   const s = state.session;
   const settings = state.settings;
@@ -181,7 +233,8 @@ function render(state) {
     ? `平均速度＝上一轮输出 Token ÷ ${s.lastTurn.speed.excludesFirstToken ? '（轮次耗时－首 Token 延迟）' : '轮次耗时'}。包含推理输出、工具执行和多次模型调用，不能代表纯生成速度。`
     : '完成一轮并记录输出 Token 与耗时后显示平均速度。它包含工具执行和多次模型调用，不能代表纯生成速度。';
   const notes = [];
-  if (s?.accounting?.partial) notes.push('当前仅展示可核实的已记录用量，历史范围不完整或存在响应冲突；详见“用量来源与模型”。');
+  if (s?.accounting?.unassignedTokens > 0) notes.push('会话累计跨模型保留；部分历史仅有累计记录，已列为“历史未归属”，不会重复相加。');
+  else if (s?.accounting?.partial) notes.push('当前仅展示可核实的已记录用量，历史范围不完整或存在响应冲突；详见“用量来源与模型”。');
   if (dragError) notes.push(dragError);
   if (state.selection.mode === 'recent') notes.push('正在重新识别当前聊天，暂显示最近活跃聊天。');
   if (state.selection.mode === 'ambiguous') notes.push('多个窗口或同名聊天无法唯一识别，请在设置中选择并锁定聊天。');
