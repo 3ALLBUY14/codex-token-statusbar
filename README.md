@@ -4,7 +4,7 @@
 
 **[下载 Windows x64 安装包](https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest)**
 
-![浮条预览：轮次均速、上下文占用、会话累计和今日用量](docs/images/statusbar.png)
+<a href="docs/images/statusbar.png"><img src="docs/images/statusbar.png" width="600" alt="浮条预览：轮次均速、上下文占用、会话累计和今日用量"></a>
 
 ## 怎么用
 
@@ -35,21 +35,21 @@
 
 **总览**
 
-![总览：指标卡片、上下文分段和账号额度](docs/images/details.png)
+<a href="docs/images/details.png"><img src="docs/images/details.png" width="640" alt="总览：指标卡片、上下文分段和账号额度"></a>
 
 **用量**
 
-![用量：七日趋势和模型排行](docs/images/usage-trend.png)
+<a href="docs/images/usage-trend.png"><img src="docs/images/usage-trend.png" width="640" alt="用量：七日趋势和模型排行"></a>
 
-![用量：近一年 Token 热力图](docs/images/usage-heatmap.png)
+<a href="docs/images/usage-heatmap.png"><img src="docs/images/usage-heatmap.png" width="640" alt="用量：近一年 Token 热力图"></a>
 
 **模型**
 
-![模型：当前和历史模型的用量卡片](docs/images/models.png)
+<a href="docs/images/models.png"><img src="docs/images/models.png" width="640" alt="模型：当前和历史模型的用量卡片"></a>
 
 **请求**
 
-![请求：按轮次分组的模型请求列表](docs/images/requests.png)
+<a href="docs/images/requests.png"><img src="docs/images/requests.png" width="640" alt="请求：按轮次分组的模型请求列表"></a>
 
 </details>
 
@@ -68,8 +68,8 @@
 <details>
 <summary>查看设置和工具记录截图</summary>
 
-![设置：分组导航和浮条外观预览](docs/images/settings.png)
+<a href="docs/images/settings.png"><img src="docs/images/settings.png" width="640" alt="设置：分组导航和浮条外观预览"></a>
 
-![工具记录：范围、分类和搜索筛选](docs/images/settings-tools.png)
+<a href="docs/images/settings-tools.png"><img src="docs/images/settings-tools.png" width="640" alt="工具记录：范围、分类和搜索筛选"></a>
 
 </details>
