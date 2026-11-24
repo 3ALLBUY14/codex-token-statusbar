@@ -48,8 +48,6 @@
 
 ### 设置
 
-<p align="center"><a href="docs/images/settings.png"><img src="docs/images/settings.png" width="480" alt="浮条外观设置，包含分组侧栏、实时预览、主题、缩放、不透明度和隐藏文字"></a></p>
-
 | 页面 | 操作 |
 | --- | --- |
 | **外观** | 预览浮条，调整主题、缩放和不透明度，或隐藏指标文字。 |
@@ -61,7 +59,9 @@
 | **诊断** | 查看窗口跟随和连接状态，检查版本或开启更新提醒。 |
 
 <details>
-<summary><strong>查看工具记录截图</strong></summary>
+<summary><strong>查看外观和工具记录截图</strong></summary>
+
+<p align="center"><a href="docs/images/settings.png"><img src="docs/images/settings.png" width="480" alt="浮条外观设置，包含分组侧栏、实时预览、主题、缩放、不透明度和隐藏文字"></a></p>
 
 <p align="center"><a href="docs/images/settings-tools.png"><img src="docs/images/settings-tools.png" width="420" alt="工具记录：范围选择、分类汇总、搜索和筛选"></a></p>
 
