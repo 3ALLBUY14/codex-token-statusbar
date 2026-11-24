@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icons/pulse.png" width="64" alt=""></p>
+<p align="center"><img src="assets/icons/pulse.png" width="48" alt=""></p>
 <h1 align="center">Codex Token 状态条</h1>
 <p align="center">在 Codex 桌面版窗口上查看 Token 用量、上下文和账号额度。</p>
 <p align="center"><strong><a href="https://github.com/3ALLBUY14/codex-token-statusbar/releases/latest">下载 Windows x64 安装包</a></strong></p>
@@ -6,19 +6,18 @@
 
 ## 快速开始
 
-1. **安装。** 解压后双击「安装.cmd」，点击「安装并启动」。便携使用可直接运行 app 目录里的 **CodexTokenStatusbar.exe**。
-2. **打开 Codex 桌面版。** 进入聊天后，浮条默认出现在窗口右上方。点击 **C** 展开明细，点击 **⚙** 打开设置。
+1. 解压安装包，双击 **安装.cmd**，点击「安装并启动」。
+2. 打开 Codex 桌面版并进入聊天。点击浮条的 <kbd>C</kbd> 查看明细，点击 <kbd>⚙</kbd> 打开设置。
+
+便携使用可直接运行 app 目录里的 **CodexTokenStatusbar.exe**。
 
 ## 界面与功能
 
-<p align="center">
-  <a href="docs/images/details.png"><img src="docs/images/details.png" width="350" alt="总览：用量指标、上下文分段和账号额度"></a>
-  &emsp;
-  <a href="docs/images/settings.png"><img src="docs/images/settings.png" width="307" alt="设置：分组导航、浮条预览和外观调整"></a>
-</p>
-<p align="center"><sub>总览与设置 · 演示数据 · 点击查看原图</sub></p>
+截图使用演示数据，点击可查看原图。
 
 ### 明细面板
+
+<p align="center"><a href="docs/images/details.png"><img src="docs/images/details.png" width="480" alt="明细总览，用量指标、上下文分段和账号额度"></a></p>
 
 | 分页 | 内容 |
 | --- | --- |
@@ -48,6 +47,8 @@
 </details>
 
 ### 设置
+
+<p align="center"><a href="docs/images/settings.png"><img src="docs/images/settings.png" width="480" alt="浮条外观设置，包含分组侧栏、实时预览、主题、缩放、不透明度和隐藏文字"></a></p>
 
 | 页面 | 操作 |
 | --- | --- |
