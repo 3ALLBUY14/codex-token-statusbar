@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function checkSettingsFeatures({ win, state, settings, setFixture, artifactDirectory }) {
+async function checkSettingsFeatures({ win, overlay, state, settings, setFixture, artifactDirectory }) {
   const previous = { ...settings.value };
   const fixture = structuredClone(state);
   fixture.sessions = Array.from({ length: 45 }, (_, index) => ({ id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`, title: `演示聊天 ${index + 1}`, model: 'Codex', tokens: index * 100, active: false }));
@@ -44,7 +44,7 @@ async function checkSettingsFeatures({ win, state, settings, setFixture, artifac
     window.toolPanel.refresh();
     const stableNodes = firstNode === list.firstElementChild;
     const tab = document.getElementById('tab-display'); tab.focus(); tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-    const keyboardTabs = document.getElementById('tab-chat').getAttribute('aria-selected') === 'true' && document.getElementById('tab-chat') === document.activeElement;
+    const keyboardTabs = document.getElementById('tab-metrics').getAttribute('aria-selected') === 'true' && document.getElementById('tab-metrics') === document.activeElement;
     return { paged, foundOlderChat, boundedPage, nextPage, categoryWorks, slowestFirst, runningVisible, nameSearchWorks, stableNodes, keyboardTabs };
   })()`);
   if (Object.values(result).some(value => !value)) throw new Error('Settings feature check failed: ' + JSON.stringify(result));
@@ -55,10 +55,35 @@ async function checkSettingsFeatures({ win, state, settings, setFixture, artifac
   result.undoWorked = settings.value.theme === 'dark' && settings.value.showTools === true && settings.value.opacity === 0.65;
   const diagnostic = await win.webContents.executeJavaScript("window.codexStatusbar.copyDiagnostics()");
   result.diagnosticPrivate = diagnostic.ok && !/演示聊天|threadId|records|mcp__demo/.test(diagnostic.text);
-  await win.webContents.executeJavaScript("document.getElementById('tab-diagnostics').click(); document.getElementById('check-update').click()"); await pause(150);
-  result.updateWorked = await win.webContents.executeJavaScript("document.getElementById('diagnostic-action-status').textContent.includes('V99.0')");
-  await win.webContents.executeJavaScript("document.getElementById('tab-tools').click(); window.scrollTo(0, 0)"); await pause(100);
+  result.settingsLinks = await win.webContents.executeJavaScript(`(async () => {
+    const links = [...document.querySelectorAll('.settings-links a')];
+    if (links.length !== 2 || links.some(link => !link.querySelector('svg'))) return false;
+    await Promise.all(links.map(link => window.codexStatusbar.openSettingsLink(link.href)));
+    try { await window.codexStatusbar.openSettingsLink('https://example.com/'); }
+    catch { return true; }
+    return false;
+  })()`);
+  await win.webContents.executeJavaScript(`document.getElementById('tab-diagnostics').click();
+    document.querySelector('[data-choice-for="update-mode"] [data-value="manual"]').click();`);
+  await pause(150);
+  result.updateModeSaved = settings.value.updateMode === 'manual';
+  await win.webContents.executeJavaScript("document.getElementById('check-update').click()");
+  await pause(250);
+  result.updateWorked = await win.webContents.executeJavaScript("document.getElementById('update-status').textContent.includes('V99.0') && document.getElementById('open-release').classList.contains('update-download')");
+  result.updateBadge = await overlay.webContents.executeJavaScript("document.getElementById('gear').classList.contains('has-update')");
+  await win.webContents.executeJavaScript("document.getElementById('tab-display').click()");
+  await overlay.webContents.executeJavaScript("document.getElementById('gear').click()");
+  await pause(150);
+  result.updateOpened = await win.webContents.executeJavaScript("document.activeElement.id === 'update-heading' && !document.getElementById('pane-diagnostics').hidden");
+  fs.writeFileSync(path.join(artifactDirectory, 'settings-update.png'), (await win.webContents.capturePage()).toPNG());
+  await win.webContents.executeJavaScript("document.getElementById('tab-tools').click()"); await pause(100);
   fs.writeFileSync(path.join(artifactDirectory, 'settings-tools-features.png'), (await win.webContents.capturePage()).toPNG());
+  settings.update({ theme: 'light' });
+  setFixture({ ...fixture, dark: false });
+  await win.webContents.executeJavaScript("document.getElementById('tab-display').click()");
+  await pause(200);
+  result.lightCaption = await win.webContents.executeJavaScript(`getComputedStyle(document.querySelector('.settings-titlebar')).backgroundColor === 'rgb(255, 255, 255)' && navigator.windowControlsOverlay.visible`);
+  fs.writeFileSync(path.join(artifactDirectory, 'settings-light.png'), (await win.webContents.capturePage()).toPNG());
   if (Object.values(result).some(value => !value)) throw new Error('Settings action check failed: ' + JSON.stringify(result));
   settings.update(previous); setFixture(null); await pause(150);
   return result;

@@ -8,7 +8,8 @@ const { SessionStore } = require('../src/session-store.cjs');
 const id = '00000000-0000-0000-0000-000000000001';
 const event = (type, payload) => JSON.stringify({ type, timestamp: '2026-10-15T01:00:00Z', payload }) + '\n';
 const total = n => ({ input_tokens: n, output_tokens: 10, cached_input_tokens: 0, reasoning_output_tokens: 0, total_tokens: n + 10 });
-const tokens = n => event('event_msg', { type: 'token_count', info: { total_token_usage: total(n), last_token_usage: total(n), model_context_window: 258400 } });
+const tokens = n => event('event_msg', { type: 'token_count', info: { total_token_usage: total(n), last_token_usage: total(n), model_context_window: 258400 },
+  rate_limits: { plan_type: 'pro', primary: { used_percent: 25, window_minutes: 10080, resets_at: 1792000000 }, secondary: null } });
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-stats-cache-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -27,11 +28,27 @@ test('unchanged logs restore equivalent statistics without replaying lines or pe
   const warm = f.create(); await warm.scan();
   assert.equal(warm.cacheHits, 1); assert.equal(warm.files.get(f.file).offset, Buffer.byteLength(f.data));
   assert.deepEqual(warm.snapshot().session, expected.session); assert.deepEqual(warm.snapshot().today, expected.today);
+  assert.deepEqual(warm.snapshot().quota, expected.quota);
+  assert.deepEqual(expected.quota.windows, [{ percent: 25, minutes: 10080, reset: 1792000000000 }]);
   const cache = await fs.readFile(path.join(f.directory, 'statistics-cache.json'), 'utf8');
   assert.equal(cache.includes('PRIVATE_'), false);
   await fs.appendFile(f.file, event('event_msg', { type: 'item_completed', item: { id: 'tool-1', type: 'CommandExecution' } }) + tokens(150)); await warm.scan();
   assert.equal(warm.snapshot().session.totals.input_tokens, 150);
   assert.equal(warm.snapshot().session.toolUsage.total, 1);
+});
+test('quota uses the newest desktop snapshot and ignores CLI and replayed snapshots', async t => {
+  const f = await fixture(t), store = f.create();
+  const quotaEvent = (timestamp, percent) => JSON.stringify({ type: 'event_msg', timestamp,
+    payload: { type: 'token_count', info: null, rate_limits: { primary: { used_percent: percent, window_minutes: 300 }, secondary: null } } }) + '\n';
+  await fs.writeFile(path.join(f.home, 'sessions', 'desktop.jsonl'),
+    event('session_meta', { id: '00000000-0000-0000-0000-000000000002', source: 'vscode' }) +
+    quotaEvent('2026-10-15T02:00:00Z', 40) + quotaEvent('2026-10-15T00:00:00Z', 10));
+  await fs.writeFile(path.join(f.home, 'sessions', 'cli.jsonl'),
+    event('session_meta', { id: '00000000-0000-0000-0000-000000000003', source: 'cli' }) + quotaEvent('2026-10-15T03:00:00Z', 90));
+  await store.scan();
+  const state = store.snapshot({ pinnedThreadId: id });
+  assert.equal(state.session.threadId, id);
+  assert.deepEqual(state.quota.windows, [{ percent: 40, minutes: 300, reset: null }]);
 });
 test('changed, replaced, truncated and partial logs are rebuilt rather than trusted', async t => {
   const f = await fixture(t), cold = f.create(); await cold.scan(); await cold.flushCache(); cold.stop();

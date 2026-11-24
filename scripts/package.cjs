@@ -18,6 +18,7 @@ async function packageApp() {
   const { packager } = await import('@electron/packager');
   const output = await packager({
     dir: root, name: 'CodexTokenStatusbar', platform: 'win32', arch: 'x64', out: path.join(root, 'dist'), overwrite: true, asar: true,
+    icon: path.join(root, require('../package.json').appIcon + '.ico'),
     electronZipDir: path.join(root, 'artifacts'), extraResource: [path.join(root, 'scripts', 'window-watch.ps1'), helper],
     ignore: /^\/(dist|release|installer|test|artifacts|docs|native|\.github|\.git|node_modules\/\.cache)(\/|$)/,
   });

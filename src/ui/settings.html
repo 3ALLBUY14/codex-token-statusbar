@@ -8,78 +8,95 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="settings-page">
-  <main class="settings-content">
-    <h1>Codex Token 状态条</h1>
-    <p class="intro">跟随当前聊天，查看 Token 和上下文。鼠标进入浮条时自动半透明，点击 C 展开或收起明细。</p>
-    <header class="settings-navigation">
+  <header class="settings-titlebar">
+    <div class="settings-caption">
+      <img id="settings-app-icon" class="settings-app-icon" width="20" height="20" alt="" draggable="false">
+      <span class="settings-app-name">Codex Token 状态条</span>
+      <h1>设置</h1>
+    </div>
+  </header>
+  <div class="settings-workspace">
+    <aside class="settings-navigation">
     <nav class="settings-tabs" role="tablist" aria-label="设置分类">
-      <button id="tab-display" role="tab" aria-controls="pane-display" aria-selected="true" data-tab="display">显示</button>
-      <button id="tab-chat" role="tab" aria-controls="pane-chat" aria-selected="false" tabindex="-1" data-tab="chat">聊天</button>
-      <button id="tab-tools" role="tab" aria-controls="pane-tools" aria-selected="false" tabindex="-1" data-tab="tools">工具</button>
-      <button id="tab-diagnostics" role="tab" aria-controls="pane-diagnostics" aria-selected="false" tabindex="-1" data-tab="diagnostics">诊断</button>
+      <span class="settings-nav-heading" aria-hidden="true">浮条</span>
+      <button id="tab-display" role="tab" aria-controls="pane-display" aria-selected="true" data-tab="display"><i class="ui-icon" data-icon="scope" aria-hidden="true"></i>外观</button>
+      <button id="tab-metrics" role="tab" aria-controls="pane-metrics" aria-selected="false" tabindex="-1" data-tab="metrics"><i class="ui-icon" data-icon="bars" aria-hidden="true"></i>指标排序</button>
+      <button id="tab-position" role="tab" aria-controls="pane-position" aria-selected="false" tabindex="-1" data-tab="position"><i class="ui-icon" data-icon="dock" aria-hidden="true"></i>贴靠与位置</button>
+      <span class="settings-nav-heading" aria-hidden="true">用量与诊断</span>
+      <button id="tab-chat" role="tab" aria-controls="pane-chat" aria-selected="false" tabindex="-1" data-tab="chat"><i class="ui-icon" data-icon="chat" aria-hidden="true"></i>聊天范围</button>
+      <button id="tab-tools" role="tab" aria-controls="pane-tools" aria-selected="false" tabindex="-1" data-tab="tools"><i class="ui-icon" data-icon="bolt" aria-hidden="true"></i>工具记录</button>
+      <button id="tab-requests" role="tab" aria-controls="pane-requests" aria-selected="false" tabindex="-1" data-tab="requests"><i class="ui-icon" data-icon="list" aria-hidden="true"></i>模型请求</button>
+      <button id="tab-diagnostics" role="tab" aria-controls="pane-diagnostics" aria-selected="false" tabindex="-1" data-tab="diagnostics"><i class="ui-icon" data-icon="gauge" aria-hidden="true"></i>诊断</button>
     </nav>
+    </aside>
+    <main class="settings-scroll" id="settings-scroll" aria-label="设置内容" tabindex="0">
+    <div class="settings-main">
+    <header class="settings-pane-header">
+    <h2 id="settings-pane-title">浮条外观</h2>
     <div class="save-feedback" id="save-feedback" data-state="idle" role="status" aria-live="polite" aria-atomic="true"><span id="save-status">更改会自动保存</span><button type="button" class="action-button" id="retry-save" hidden>重试保存</button></div>
     </header>
     <div id="pane-display" role="tabpanel" aria-labelledby="tab-display" data-pane="display">
+    <section class="preview-section" aria-labelledby="appearance-preview-title">
+      <div class="settings-group-heading"><h3 id="appearance-preview-title">浮条预览</h3><span>示例数据</span></div>
+      <div class="appearance-preview"><div id="appearance-capsule" aria-label="浮条外观示例"><b>C</b><div id="appearance-metrics"></div></div></div>
+    </section>
+    <section class="settings-group display-settings">
+      <h3>显示样式</h3>
+      <div class="setting-row choice-row"><span id="theme-label">主题</span><select id="theme" data-setting="theme" hidden><option value="system">跟随 Windows</option><option value="dark">深色</option><option value="light">浅色</option></select><div class="preference-choices" data-choice-for="theme" role="group" aria-labelledby="theme-label"></div></div>
+      <div class="setting-row choice-row"><span id="scale-label">浮条缩放</span><select id="scale" data-setting="scale" hidden><option value="0.75">75%</option><option value="0.85">85%</option><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option><option value="1.5">150%</option></select><div class="preference-choices" data-choice-for="scale" role="group" aria-labelledby="scale-label"></div></div>
+      <div class="setting-row"><div><label for="opacity">浮条不透明度</label><small class="setting-hint" id="opacity-note">拖动预览，松开保存</small></div><div class="opacity-control"><input id="opacity" type="range" min="20" max="100" step="5" value="100" data-setting="opacity" aria-describedby="opacity-note" aria-valuetext="100%"><output id="opacity-value" for="opacity">100%</output></div></div>
+      <label class="setting-toggle"><input type="checkbox" role="switch" data-setting="hideLabels"><span>隐藏浮条文字<small>保留数值、进度及操作按钮。</small></span></label>
+    </section>
+    </div>
+    <div id="pane-metrics" role="tabpanel" aria-labelledby="tab-metrics" data-pane="metrics" hidden>
     <section class="settings-group">
-      <h2>浮条显示项</h2>
-      <div class="check-grid">
-        <label><input type="checkbox" data-setting="showSpeed">平均输出速度</label>
-        <label><input type="checkbox" data-setting="showContext">上下文占用</label>
-        <label><input type="checkbox" data-setting="showSession">会话累计 Token</label>
-        <label><input type="checkbox" data-setting="showTurn">本轮 / 上轮 Token</label>
-        <label><input type="checkbox" data-setting="showToday">今日 Token</label>
-        <label><input type="checkbox" data-setting="showCache">缓存命中率</label>
-        <label><input type="checkbox" data-setting="showTools">工具调用</label>
-      </div>
+      <div class="settings-group-heading"><h3>显示项与优先级</h3><span id="metric-enabled-count"></span></div>
+      <p class="settings-note metric-order-note">勾选显示。拖动或按上下按钮排序，靠前的指标优先显示。</p>
+      <ol class="metric-order" id="metric-order" aria-label="浮条指标显示顺序"></ol>
       <a class="tool-details-link" href="#tool-details" id="open-tool-details">查看工具调用明细</a>
-      <label class="drag-option"><input type="checkbox" data-setting="hideLabels">隐藏浮条文字</label>
-      <p class="settings-note">隐藏指标名称和跟随状态，保留数值、进度条及 C、设置按钮；明细仍显示完整文字。</p>
     </section>
+    </div>
+    <div id="pane-position" role="tabpanel" aria-labelledby="tab-position" data-pane="position" hidden>
     <section class="settings-group">
-      <h2>外观</h2>
-      <div class="setting-row"><label for="theme">主题</label><select id="theme" data-setting="theme"><option value="system">跟随 Windows</option><option value="dark">深色</option><option value="light">浅色</option></select></div>
-      <div class="setting-row"><label for="scale">缩放</label><select id="scale" data-setting="scale"><option value="0.75">75%</option><option value="0.85">85%</option><option value="1">100%</option><option value="1.15">115%</option><option value="1.3">130%</option><option value="1.5">150%</option></select></div>
-      <div class="setting-row"><label for="opacity">浮条不透明度</label><div class="opacity-control"><input id="opacity" type="range" min="20" max="100" step="5" value="100" data-setting="opacity" aria-describedby="opacity-note" aria-valuetext="100%"><output id="opacity-value" for="opacity">100%</output></div></div>
-      <p class="settings-note" id="opacity-note">数值越低越透明，拖动预览、松开保存。仅影响浮条，明细与设置保持清晰；鼠标进入时继续半透明避让。</p>
-    </section>
-    <section class="settings-group">
-      <h2>位置与拖动</h2>
-      <label><input type="checkbox" data-setting="dockToComposer">贴靠 Codex 窗口</label>
+      <h3>贴靠 Codex</h3>
+      <label class="setting-toggle"><input type="checkbox" role="switch" data-setting="dockToComposer"><span>跟随窗口贴靠</span></label>
       <div class="setting-row"><label for="dock-target">贴靠区域</label><select id="dock-target" data-setting="dockTarget"><option value="titlebar">标题栏内</option><option value="composer">输入框附近</option></select></div>
       <div class="setting-row"><label for="composer-alignment">贴靠对齐</label><select id="composer-alignment" data-setting="composerAlignment" aria-describedby="composer-alignment-note"><option value="center">自适应居中</option><option value="left">靠左</option><option value="right">靠右</option></select></div>
-      <p class="settings-note" id="composer-alignment-note">以所选区域对齐，随宽度变化自动调整；展开明细时保持浮条对齐。标题栏模式自动缩小以适应高度，避开菜单与窗口按钮。</p>
-      <p class="settings-note" id="composer-note">标题栏模式避开菜单与窗口按钮，明细向下展开；输入框模式优先放下方，空间不足放上方。离开 Codex 或区域未识别时隐藏。</p>
+      <p class="settings-note" id="composer-alignment-note">展开明细时保持浮条与所选区域的对齐。</p>
+      <p class="settings-note settings-callout" id="composer-note"></p>
+    </section>
+    <section class="settings-group">
+      <h3>自由浮动</h3>
       <div class="setting-row"><label for="placement">跟随窗口的位置</label><select id="placement" data-setting="placement"><option value="top-right">右上方</option><option value="bottom-right">右下方</option><option value="bottom-center">底部居中</option></select></div>
-      <label class="drag-option"><input type="checkbox" data-setting="allowDrag">允许自由拖动浮条</label>
-      <p class="settings-note">拖动指标或空白处移动，松开保存；C 和设置按钮仍可点击。</p>
-      <label><input type="checkbox" data-setting="rememberDisplayPositions">按显示器记住浮条位置</label>
-      <label class="drag-option"><input type="checkbox" data-setting="alwaysVisible">切换到其他应用时仍显示</label>
-      <label class="drag-option"><input type="checkbox" data-setting="desktopCompatibility">兼容第三方桌面（加强置顶）</label>
-      <p class="settings-note">适用于 Seelen UI 等桌面工具，自动恢复浮条层级，不抢占键盘焦点；设置窗口操作期间暂停恢复。</p>
+      <label class="setting-toggle"><input type="checkbox" role="switch" data-setting="allowDrag"><span>允许自由拖动<small>拖动指标或空白处，松开后保存位置。</small></span></label>
+      <label class="setting-toggle"><input type="checkbox" role="switch" data-setting="rememberDisplayPositions"><span>按显示器记住位置</span></label>
+      <label class="setting-toggle"><input type="checkbox" role="switch" data-setting="alwaysVisible"><span>切换到其他应用时仍显示</span></label>
       <details class="advanced-settings" id="advanced-position"><summary>高级位置设置</summary>
       <div class="setting-row"><label for="offsetX">水平偏移</label><input id="offsetX" type="number" min="-20000" max="20000" step="10" data-setting="offsetX"></div>
       <div class="setting-row"><label for="offsetY">垂直偏移</label><input id="offsetY" type="number" min="-20000" max="20000" step="10" data-setting="offsetY"></div>
       <p class="settings-note">位置按 Codex 所在显示器分别保存，支持跨屏拖动。拔掉目标显示器后回到可用屏幕；“恢复浮条位置”清除所有位置记忆。</p>
       </details>
     </section>
-    <details class="settings-group"><summary>统计口径说明</summary><p class="settings-note">上一轮输出 Token ÷（轮次耗时－首 Token 延迟）。缺少首 Token 时间时按完整耗时计算。包含推理输出、工具执行和多次模型调用，因此显示的是轮次平均速度。</p><p class="settings-note">缓存输入和推理输出不会重复计入总量。Token 用量不等同于套餐额度或账单。</p></details>
+    <section class="settings-group">
+      <h3>桌面兼容</h3>
+      <label class="setting-toggle"><input type="checkbox" role="switch" data-setting="desktopCompatibility"><span>加强置顶<small>用于 Seelen UI 等桌面工具。恢复浮条层级时无需抢占键盘焦点。</small></span></label>
+    </section>
     </div>
     <div id="pane-chat" role="tabpanel" aria-labelledby="tab-chat" data-pane="chat" hidden>
     <section class="settings-group">
-      <h2>聊天与上下文</h2>
+      <h3>聊天与上下文</h3>
       <p class="status-line" id="connection">连接中…</p>
       <label class="search-label" for="chat-search">搜索聊天</label><input class="full-select" type="search" id="chat-search" placeholder="标题、模型或聊天 ID" autocomplete="off">
       <label class="search-label" for="chat">跟随或锁定聊天</label><select class="full-select" id="chat" data-setting="pinnedThreadId"><option value="">自动跟随当前聊天</option></select>
       <div class="pager"><button class="action-button" id="chat-prev" aria-label="上一页聊天">上一页</button><span id="chat-page" aria-live="polite"></span><button class="action-button" id="chat-next" aria-label="下一页聊天">下一页</button></div>
       <div class="setting-row"><label for="contextOverride">手动窗口容量</label><input id="contextOverride" type="number" min="1000" max="10000000" step="1000" placeholder="自动" data-setting="contextOverride"></div>
-      <p class="settings-note">容量留空则使用日志记录的值。100 万 Token 以下的窗口在 70% / 85% 预警，100 万及以上在 40% / 60% 预警。多个 Codex 窗口同时打开时，可锁定一个聊天，避免混用数据。</p>
+      <p class="settings-note">留空使用日志容量。预警阈值可在总览的上下文图例里查看。</p>
     </section>
-    <section class="settings-group"><h2>用量来源与模型</h2><p class="settings-note">切换下方范围只影响明细；浮条始终显示当前聊天，关联子任务不重复加入浮条累计。</p><div id="settings-usage-details"></div></section>
+    <section class="settings-group"><h3>用量来源与模型</h3><p class="settings-note">切换下方范围只影响明细；浮条始终显示当前聊天，关联子任务不重复加入浮条累计。</p><div id="settings-usage-details"></div></section>
     </div>
     <div id="pane-tools" role="tabpanel" aria-labelledby="tab-tools" data-pane="tools" hidden>
     <section class="settings-group" aria-labelledby="tool-details-heading">
-      <h2 id="tool-details-heading">工具调用明细</h2>
+      <h3 id="tool-details-heading">工具调用明细</h3>
       <p class="settings-note tool-chat" id="tool-chat">等待聊天数据</p>
       <div id="tool-details">
         <div class="tool-controls">
@@ -92,7 +109,7 @@
             <thead><tr><th scope="col">分类</th><th scope="col">次数</th><th scope="col">失败</th><th scope="col">计时</th><th scope="col">耗时</th></tr></thead>
             <tbody id="settings-tool-groups"></tbody>
           </table>
-        </div><p class="settings-note">计时表示有耗时记录的次数；耗时只合计日志提供的值。汇总包含全部调用，不受记录筛选影响。</p></details>
+        </div><p class="settings-note">只合计有记录的耗时。筛选只影响下方列表。</p></details>
         <div class="tool-filters"><label>类别<select id="tool-category"><option value="all">全部类别</option><option value="CommandExecution">命令执行</option><option value="FileChange">文件修改</option><option value="Extension">扩展操作</option><option value="ImageView">图像查看</option></select></label><label>排序<select id="tool-sort"><option value="newest">最近完成</option><option value="duration">耗时从长到短</option></select></label></div>
         <label class="search-label" for="tool-search">搜索工具</label><input type="search" class="full-select" id="tool-search" placeholder="工具名称或类别" autocomplete="off">
         <h3 class="running-heading" id="running-heading" hidden>执行中</h3><ol class="tool-records" id="settings-running-tools" aria-label="执行中的工具调用"></ol>
@@ -104,13 +121,31 @@
       </div>
     </section>
     </div>
+    <div id="pane-requests" role="tabpanel" aria-labelledby="tab-requests" data-pane="requests" hidden>
+      <section class="settings-group" aria-labelledby="request-heading">
+        <h3 id="request-heading">模型请求明细</h3>
+        <p class="tool-chat" id="request-chat"></p>
+        <div id="request-view"></div>
+      </section>
+    </div>
     <div id="pane-diagnostics" role="tabpanel" aria-labelledby="tab-diagnostics" data-pane="diagnostics" hidden>
+    <section class="settings-group" aria-labelledby="update-heading">
+      <h3 class="icon-heading" id="update-heading" tabindex="-1"><i class="ui-icon" data-icon="update" aria-hidden="true"></i>版本更新</h3>
+      <div class="update-version"><span>当前版本</span><strong id="diag-version">—</strong></div>
+      <div class="setting-row choice-row">
+        <span id="update-mode-label">更新提醒</span>
+        <select id="update-mode" data-setting="updateMode" hidden><option value="badge">自动提示</option><option value="popup">弹出通知</option><option value="manual">仅手动</option></select>
+        <div class="preference-choices" data-choice-for="update-mode" role="group" aria-labelledby="update-mode-label" aria-describedby="update-mode-note"></div>
+      </div>
+      <p class="settings-note" id="update-mode-note"></p>
+      <p class="settings-note update-status" id="update-status" role="status">尚未检查更新</p>
+      <div class="diagnostic-actions"><button class="action-button" id="check-update">检查更新</button><button class="action-button" id="open-release">打开下载页</button></div>
+    </section>
     <section class="settings-group" aria-label="运行诊断">
-      <h2>运行诊断</h2>
-      <p class="status-line" id="diag-state" role="status">正在检查</p>
+      <h3>运行诊断</h3>
+      <p class="status-line diagnostic-status" id="diag-state" role="status">正在检查</p>
       <p class="settings-note" id="diag-state-note"></p>
       <div class="diagnostic-rows">
-        <div><span>版本</span><strong id="diag-version">—</strong></div>
         <div><span>聊天连接</span><strong id="diag-connection">—</strong></div>
         <div><span>识别方式</span><strong id="diag-source">—</strong></div>
         <div><span>识别可信度</span><strong id="diag-confidence">—</strong></div>
@@ -129,17 +164,50 @@
         <div><span>Token 更新时间</span><strong id="diag-updated">—</strong></div>
       </div>
       <p class="settings-note" id="diag-advice"></p>
-      <div class="diagnostic-actions"><button class="action-button" id="copy-diagnostics">复制诊断</button><button class="action-button" id="check-update">检查更新</button><button class="action-button" id="open-release">打开下载页</button></div>
+      <div class="diagnostic-actions"><button class="action-button" id="copy-diagnostics">复制诊断</button></div>
       <p class="settings-note" id="diagnostic-action-status" aria-live="polite"></p>
-      <p class="settings-note">复制内容不包含聊天标题、ID、用户路径或调用正文。仅主动检查更新时访问 GitHub。</p>
+      <p class="settings-note">复制内容不包含聊天标题、ID、用户路径或调用正文。</p>
     </section>
+    <details class="settings-group settings-help"><summary>统计口径说明</summary><p class="settings-note">上一轮输出 Token ÷（轮次耗时－首 Token 延迟）。缺少首 Token 时间时按完整耗时计算。结果包含推理、工具执行和多次模型调用。</p><p class="settings-note">缓存输入和推理输出分别计入输入和输出。套餐额度以 Codex 为准。</p></details>
     </div>
-    <div class="actions"><button class="action-button" id="refresh">重新检测与刷新</button><button class="action-button" id="restore-position">恢复浮条位置</button><button class="action-button" id="reset">恢复默认显示</button><button class="action-button" id="quit">退出状态条</button></div>
-    <p class="settings-note" id="reset-message" aria-live="polite"></p><button class="action-button" id="undo-reset" hidden>撤销恢复默认显示</button>
-  </main>
+    </div>
+    </main>
+    <nav class="settings-links" aria-label="外部链接">
+      <a class="settings-resource" href="https://space.bilibili.com/14642527?spm_id_from=333.1007.0.0">
+        <svg class="resource-icon resource-bilibili" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m5 2 3 2.5L11 2"/><rect x="1.7" y="4.7" width="12.6" height="9.6" rx="2.3"/>
+          <path d="m5 8.5 1.4.7m4.6-.7-1.4.7M7 11h2"/>
+        </svg>
+        <span>B 站主页</span><i class="resource-arrow" aria-hidden="true"></i>
+      </a>
+      <a class="settings-resource" href="https://github.com/3ALLBUY14/codex-token-statusbar">
+        <svg class="resource-icon resource-github" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="4.1" cy="3.4" r="1.6"/><circle cx="4.1" cy="12.6" r="1.6"/><circle cx="11.9" cy="3.4" r="1.6"/>
+          <path d="M4.1 5v6m7.8-6.1v.7a3.1 3.1 0 0 1-3.1 3.1H4.1"/>
+        </svg>
+        <span>GitHub 仓库</span><i class="resource-arrow" aria-hidden="true"></i>
+      </a>
+      <p id="settings-link-status" role="status"></p>
+    </nav>
+    <footer class="settings-actions">
+      <div class="settings-actions-inner">
+        <div class="settings-reset-feedback"><p id="reset-message" aria-live="polite"></p><button class="action-button" id="undo-reset" hidden>撤销</button></div>
+        <div class="actions">
+          <button class="settings-action" id="refresh"><i class="ui-icon" data-icon="refresh" aria-hidden="true"></i>重新检测</button>
+          <button class="settings-action" id="restore-position"><i class="ui-icon" data-icon="dock" aria-hidden="true"></i>恢复浮条位置</button>
+          <button class="settings-action" id="reset"><i class="ui-icon" data-icon="undo" aria-hidden="true"></i>恢复默认显示</button>
+        </div>
+      </div>
+    </footer>
+    <div class="settings-utilities">
+      <button class="settings-action" id="quit"><i class="ui-icon" data-icon="power" aria-hidden="true"></i>退出状态条</button>
+    </div>
+  </div>
   <script src="snapshot-guard.js"></script>
   <script src="usage-details.js"></script>
   <script src="tool-details.js"></script>
+  <script src="metric-options.js"></script>
+  <script src="request-details.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

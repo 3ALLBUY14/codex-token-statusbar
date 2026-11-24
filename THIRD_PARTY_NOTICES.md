@@ -13,6 +13,10 @@ commit `ac328de0523f60b83d0c5cd3ccacda8eda86f55e`.
 Copyright (c) 2026 xhwx. MIT license; retained in `third_party/zcode/LICENSE`.
 The original ZCode installer, database collector, and injection loader are not run.
 
+The dashboard, segmented context meter, and quota presentation in V3
+take visual inspiration from
+[yuhuan-dev/antigravity-usage-monitor](https://github.com/yuhuan-dev/antigravity-usage-monitor).
+
 The Codex IPC framing and active-thread notification names were researched against
 [soleillevant0125/codex-token-overlay](https://github.com/soleillevant0125/codex-token-overlay).
 The client in this project is an independent Node.js implementation. IPC is an

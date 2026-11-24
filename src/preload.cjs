@@ -18,7 +18,9 @@ contextBridge.exposeInMainWorld('codexStatusbar', {
     if (!response.ok) throw new Error(response.error.message);
     return response.value;
   },
-  settings: () => ipcRenderer.send('statusbar:open-settings'),
+  settings: pane => ipcRenderer.send('statusbar:open-settings', pane),
+  onRequestFilters: callback => ipcRenderer.on('statusbar:request-filters', () => callback()),
+  onShowUpdates: callback => ipcRenderer.on('statusbar:show-updates', () => callback()),
   restorePosition: async () => {
     const response = await ipcRenderer.invoke('statusbar:restore-position');
     if (!response.ok) throw new Error(response.error.message);
@@ -28,7 +30,9 @@ contextBridge.exposeInMainWorld('codexStatusbar', {
   onDragError: callback => ipcRenderer.on('statusbar:drag-error', (_, message) => callback(message)),
   quit: () => ipcRenderer.send('statusbar:quit'),
   toolInterest: enabled => ipcRenderer.send('statusbar:tool-interest', enabled === true),
+  modelRequests: (threadId, filters) => ipcRenderer.invoke('statusbar:model-requests', threadId, filters),
   copyDiagnostics: () => ipcRenderer.invoke('statusbar:copy-diagnostics'),
   checkUpdate: () => ipcRenderer.invoke('statusbar:check-update'),
   openRelease: () => ipcRenderer.invoke('statusbar:open-release'),
+  openSettingsLink: url => ipcRenderer.invoke('statusbar:open-settings-link', url),
 });

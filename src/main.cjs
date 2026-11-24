@@ -1,15 +1,17 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, nativeTheme, screen, session, clipboard, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, nativeImage, nativeTheme, screen, session, clipboard, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { WindowWatcher } = require('./window-watcher.cjs');
 const { SessionStore } = require('./session-store.cjs');
 const { CodexIpc } = require('./codex-ipc.cjs');
+const { readCodexQuota } = require('./codex-quota.cjs');
 const { DesktopNavigation } = require('./desktop-navigation.cjs');
 const { VisibleChat, resolveVisibleSelection } = require('./visible-chat.cjs');
 const { SettingsStore } = require('./settings.cjs');
 const { contextStatus } = require('./metrics.cjs');
+const { requestPage } = require('./response-usage.cjs');
 const { anchorPosition, displayPosition, positionPatch, clampBounds } = require('./display-position.cjs');
 const { diagnosticSummary, diagnosticState, newerVersion, versionParts, RELEASE_URL, UPDATE_URL } = require('./diagnostics.cjs');
 const { OverlayLayer } = require('./overlay-layer.cjs');
@@ -17,9 +19,24 @@ const { composerPosition, titlebarPosition } = require('./composer-position.cjs'
 const overlayLayer = new OverlayLayer();
 
 app.setName('Codex Token Statusbar');
-const displayVersion = require('../package.json').displayVersion ?? app.getVersion();
+const packageInfo = require('../package.json');
+const displayVersion = packageInfo.displayVersion ?? app.getVersion();
+const appIconFile = path.join(__dirname, '..', `${packageInfo.appIcon}.png`);
+const appIconName = path.basename(packageInfo.appIcon);
+const settingsLinks = new Set([
+  'https://space.bilibili.com/14642527?spm_id_from=333.1007.0.0',
+  'https://github.com/3ALLBUY14/codex-token-statusbar',
+]);
 const smoke = process.argv.includes('--smoke');
 const demo = process.argv.includes('--demo');
+const nativeUpdates = process.platform === 'win32' && !smoke && !demo;
+const updateActivation = 'type=click&view=updates';
+// Windows starts the registered notification activator with -Embedding.
+const isNotificationLaunch = args => nativeUpdates && args.some(arg => arg.toLowerCase() === '-embedding');
+if (nativeUpdates) {
+  app.setAppUserModelId('io.github.3ALLBUY14.CodexTokenStatusbar');
+  app.setToastActivatorCLSID('{AEFF8848-6C82-4123-8D2A-E15979826C83}');
+}
 const smokeAt = process.argv.indexOf('--artifacts');
 const artifactDirectory = smokeAt >= 0 ? path.resolve(process.argv[smokeAt + 1]) : path.join(__dirname, '..', 'artifacts');
 if (smoke || demo) app.setPath('userData', path.join(artifactDirectory, smoke ? 'smoke-profile' : 'demo-profile'));
@@ -34,6 +51,7 @@ let hostVisible = false;
 let ownForeground = false;
 let previewFixture = false;
 let fixtureOverride = null;
+let fixtureRequests = null;
 let compactLayout = null;
 let dragSession = null;
 let watcherLastSampleAt = 0;
@@ -42,7 +60,14 @@ let watcherWatchdog;
 let settingsWantsTools = false;
 let catalogCache = null;
 let catalogSignature = '';
-let updateRequest = null;
+let updateSession, updateTimer, updateRequest;
+let updateResult = null, lastNotifiedRelease = null;
+let updateNotification = null, updateNotificationPending = false;
+let lastUpdateActivation = -Infinity;
+let settingsCaptionDark;
+const updateInterval = 24 * 60 * 60 * 1000;
+const quotaInterval = 5 * 60 * 1000;
+let officialQuota = null, quotaStatus = null, quotaTimer, quotaRequest;
 let composerSample = null, hostHandle = 0, dockStatus = 'off';
 let deliverySequence = 0, deliveryEpoch = 0, deliverySelection = null;
 function previewOpacity(value) {
@@ -90,11 +115,121 @@ function settingsFailure(error) {
   return { ok: false, error: { code, message } };
 }
 
+async function fetchRelease() {
+  if (smoke) return { ok: true, tag: 'V99.0', newer: true };
+  try {
+    const response = await updateSession.fetch(UPDATE_URL, {
+      credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'CodexTokenStatusbar' },
+    });
+    if (!response.ok) throw new Error('update-http-error');
+    const body = await response.text();
+    if (body.length > 256000) throw new Error('update-response-limit');
+    const release = JSON.parse(body);
+    if (typeof release.tag_name !== 'string' || !versionParts(release.tag_name) || release.draft || release.prerelease) throw new Error('update-invalid-release');
+    return { ok: true, tag: release.tag_name, newer: newerVersion(release.tag_name, displayVersion) };
+  } catch {
+    return { ok: false, message: '暂时无法检查更新，可直接打开 GitHub 发布页。' };
+  }
+}
+
+function openUpdateNotification() {
+  const now = performance.now();
+  // Windows can deliver both an activation callback and an instance click.
+  if (quitting || now - lastUpdateActivation < 250) return;
+  lastUpdateActivation = now;
+  openSettings('updates');
+}
+
+function showUpdateNotification(tag) {
+  if (updateNotificationPending || !Notification.isSupported()) return;
+  const notification = new Notification({
+    id: 'CodexReleaseUpdate',
+    toastXml: `<toast launch="${updateActivation.replace('&', '&amp;')}">
+      <visual><binding template="ToastGeneric">
+        <text>状态条有新版 ${tag}</text>
+        <text>点击查看版本更新。</text>
+      </binding></visual>
+      <audio silent="true"/>
+    </toast>`,
+  });
+  updateNotification = notification;
+  updateNotificationPending = true;
+  notification.once('click', openUpdateNotification);
+  notification.once('show', () => {
+    updateNotificationPending = false;
+    lastNotifiedRelease = tag;
+    try { settings.update({ lastNotifiedRelease }); } catch { /* Keep the reminder deduplicated in memory. */ }
+  });
+  notification.once('failed', () => {
+    if (updateNotification !== notification) return;
+    updateNotification = null;
+    updateNotificationPending = false;
+  });
+  try { notification.show(); }
+  catch {
+    updateNotification = null;
+    updateNotificationPending = false;
+  }
+}
+
+async function checkUpdates(background = false) {
+  if (!updateRequest) {
+    updateRequest = fetchRelease().then(result => {
+      if (result.ok || !updateResult?.ok) updateResult = result;
+      return result;
+    }).finally(() => {
+      updateRequest = null;
+      queuePublish();
+    });
+    queuePublish();
+  }
+  const result = await updateRequest;
+  if (background && !quitting && result.newer && nativeUpdates && settings.value.updateMode === 'popup'
+      && (!lastNotifiedRelease || newerVersion(result.tag, lastNotifiedRelease))) {
+    showUpdateNotification(result.tag);
+  }
+  return result;
+}
+
+function scheduleUpdateCheck(delay = 5000) {
+  clearTimeout(updateTimer);
+  if (quitting || smoke || demo || settings.value.updateMode === 'manual') return;
+  // Let Electron register the Windows notification identity before the first check.
+  if (nativeUpdates && settings.value.updateMode === 'popup') Notification.isSupported();
+  updateTimer = setTimeout(() => {
+    scheduleUpdateCheck(updateInterval);
+    void checkUpdates(true);
+  }, delay);
+}
+
+async function refreshQuota() {
+  if (quitting || smoke || demo || quotaRequest) return;
+  clearTimeout(quotaTimer);
+  const request = quotaRequest = new AbortController();
+  quotaStatus = 'refreshing';
+  queuePublish();
+  const quota = await readCodexQuota(packageInfo.version, request.signal);
+  quotaRequest = null;
+  if (quitting) return;
+  if (quota) officialQuota = quota;
+  quotaStatus = quota ? null : 'unavailable';
+  quotaTimer = setTimeout(refreshQuota, quotaInterval);
+  queuePublish();
+}
+
+function refreshData() {
+  ipc.refreshBinding();
+  store.scan();
+  void refreshQuota();
+}
+
 function publish() {
   if (!store || quitting) return;
   const route = navigation?.status();
   const selection = route ? { ...ipc.status(), ...resolveVisibleSelection(route, visibleChat.status(navigation.processId), Boolean(visibleChat.titleForId(route.threadId))) } : ipc.status();
   latest = store.snapshot(settings.value, selection, { includeRecords: Boolean(settingsWindow?.isVisible() && settingsWantsTools), includeSessions: Boolean(settingsWindow?.isVisible()) });
+  latest.quota = { source: 'local', ...(officialQuota ?? latest.quota), status: quotaStatus };
   if (settingsWindow?.isVisible()) {
     const signature = `${store.revision}:${visibleChat?.stamp}`;
     if (catalogSignature !== signature || !catalogCache) {
@@ -122,6 +257,8 @@ function publish() {
         indexError: latest.runtime.indexError, cacheHits: latest.health.cacheHits, cacheError: latest.health.cacheError,
         displayCount: latest.runtime.displayCount, displayScale: latest.runtime.displayScale,
         overlayVisible: latest.runtime.overlayVisible, overlayTopmost: latest.runtime.overlayTopmost, composerDock: latest.runtime.composerDock,
+        quotaSource: latest.quota.source, quotaStatus, quotaRecordedAt: latest.quota.recordedAt ?? null,
+        quotaWindows: latest.quota.windows?.map(window => window.minutes) ?? [],
         toolsTotal: latest.session?.toolUsage?.total ?? 0, toolsRecords: latest.session?.toolUsage?.records?.length ?? 0,
       }, null, 2));
     } catch { /* Optional diagnostics must not interrupt the overlay. */ }
@@ -134,6 +271,7 @@ function publish() {
     Object.assign(latest.session.context, contextStatus(latest.session.context.percent, settings.value.contextOverride));
   }
   const displayState = fixtureOverride ? { ...fixtureOverride, settings: { ...settings.value, ...currentPositionSettings() } } : previewFixture || demo ? demoState() : latest;
+  displayState.update = { ...updateResult, checking: Boolean(updateRequest) };
   const selectionKey = `${displayState.selection.mode}:${displayState.selection.threadId ?? ''}`;
   if (selectionKey !== deliverySelection) { deliverySelection = selectionKey; deliveryEpoch++; }
   displayState.delivery = { sequence: ++deliverySequence, epoch: deliveryEpoch, sentAt: Date.now() };
@@ -144,7 +282,13 @@ function publish() {
     const lightweight = session ? { ...session, toolUsage: strip(session.toolUsage), turnToolUsage: strip(session.turnToolUsage), lastTurn: session.lastTurn ? { ...session.lastTurn, toolUsage: strip(session.lastTurn.toolUsage) } : null, runningTools: [], turnRunningTools: [] } : null;
     overlay.webContents.send('statusbar:snapshot', { ...displayState, sessions: [], session: lightweight });
   }
-  if (settingsWindow && !settingsWindow.isDestroyed() && (settingsWindow.isVisible() || smoke || demo)) settingsWindow.webContents.send('statusbar:snapshot', displayState);
+  if (settingsWindow && !settingsWindow.isDestroyed() && (settingsWindow.isVisible() || smoke || demo)) {
+    if (displayState.dark !== settingsCaptionDark) {
+      settingsWindow.setTitleBarOverlay(settingsCaption(displayState.dark));
+      settingsCaptionDark = displayState.dark;
+    }
+    settingsWindow.webContents.send('statusbar:snapshot', { ...displayState, appIconName });
+  }
   if (tray) {
     const total = latest.session?.hasUsage ? latest.session.totals.total_tokens.toLocaleString('zh-CN') : '—';
     tray.setToolTip(`Codex Token 状态条\n会话 ${total} tokens\n上下文 ${latest.session?.context.percent?.toFixed(1) ?? '—'}%`);
@@ -336,11 +480,30 @@ function createOverlay() {
   overlay.on('close', event => { if (!quitting) { event.preventDefault(); manuallyHidden = true; overlay.hide(); } });
 }
 
-function openSettings() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) { settingsWindow.show(); settingsWindow.focus(); return; }
+function settingsCaption(dark) {
+  return { height: 36, color: dark ? '#191c22' : '#ffffff', symbolColor: dark ? '#f1f3f7' : '#182230' };
+}
+
+function openSettings(pane) {
+  const openPane = win => {
+    if (win.isDestroyed()) return;
+    if (pane === 'requests') win.webContents.send('statusbar:request-filters');
+    if (pane === 'updates') win.webContents.send('statusbar:show-updates');
+  };
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    const opened = settingsWindow;
+    if (opened.isMinimized()) opened.restore();
+    opened.show();
+    opened.focus();
+    if (opened.webContents.isLoadingMainFrame()) opened.webContents.once('did-finish-load', () => openPane(opened));
+    else openPane(opened);
+    return;
+  }
+  settingsCaptionDark = latest?.dark ?? nativeTheme.shouldUseDarkColors;
   settingsWindow = new BrowserWindow({
-    title: 'Codex Token 状态条设置', width: 560, height: 720, minWidth: 460, minHeight: 500,
-    show: false, autoHideMenuBar: true, backgroundColor: latest?.dark ? '#13161e' : '#f5f6f8',
+    title: 'Codex Token 状态条设置', width: 734, height: 650, minWidth: 460, minHeight: 500,
+    show: false, titleBarStyle: 'hidden', titleBarOverlay: settingsCaption(settingsCaptionDark),
+    icon: appIconFile, backgroundColor: settingsCaptionDark ? '#111318' : '#f6f7fa',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: !smoke },
   });
   settingsWindow.setMenu(null);
@@ -348,7 +511,14 @@ function openSettings() {
   settingsWindow.webContents.on('will-navigate', event => event.preventDefault());
   settingsWindow.webContents.on('did-start-loading', () => previewOpacity(null));
   const opened = settingsWindow;
-  opened.once('ready-to-show', () => { if (!opened.isDestroyed()) { opened.show(); opened.focus(); updateActivity(); publish(); } });
+  opened.once('ready-to-show', () => {
+    if (opened.isDestroyed()) return;
+    opened.show();
+    opened.focus();
+    updateActivity();
+    publish();
+    openPane(opened);
+  });
   settingsWindow.loadFile(path.join(__dirname, 'ui', 'settings.html'));
   settingsWindow.on('focus', positionOverlay);
   settingsWindow.on('blur', positionOverlay);
@@ -356,20 +526,14 @@ function openSettings() {
 }
 
 function buildTray() {
-  // A tiny local bitmap avoids any external image or runtime network dependency.
-  const bytes = Buffer.alloc(20 * 20 * 4);
-  for (let y = 2; y < 18; y++) for (let x = 2; x < 18; x++) {
-    const offset = (y * 20 + x) * 4;
-    const lit = x === 3 || x === 16 || y === 3 || y === 16 || x >= 7 && x <= 12 && y >= 7 && y <= 12;
-    if (lit) { bytes[offset] = 142; bytes[offset + 1] = 207; bytes[offset + 2] = 62; bytes[offset + 3] = 255; }
-  }
-  tray = new Tray(nativeImage.createFromBitmap(bytes, { width: 20, height: 20 }));
+  tray = new Tray(nativeImage.createFromPath(appIconFile).resize({ width: 32, height: 32, quality: 'best' }));
   const menu = () => Menu.buildFromTemplate([
     { label: 'Codex Token 状态条', enabled: false },
     { label: manuallyHidden ? '显示浮条' : '隐藏浮条', click: () => { manuallyHidden = !manuallyHidden; positionOverlay(); } },
     { label: '设置与聊天选择…', click: openSettings },
+    { label: updateResult?.newer ? `发现新版 ${updateResult.tag}…` : '版本更新…', click: () => openSettings('updates') },
     { label: '恢复浮条位置', click: restorePosition },
-    { label: '刷新本地数据', click: () => { ipc.refreshBinding(); store.scan(); } },
+    { label: '刷新用量与额度', click: refreshData },
     { type: 'separator' },
     { label: '跟随当前聊天', type: 'checkbox', checked: !settings.value.pinnedThreadId, click: () => { settings.update({ pinnedThreadId: null }); publish(); } },
     { label: '始终显示', type: 'checkbox', checked: settings.value.alwaysVisible, click: item => { settings.update({ alwaysVisible: item.checked }); publish(); positionOverlay(); } },
@@ -394,13 +558,17 @@ function demoState() {
     { sequence: 3, type: 'FileChange', label: '文件修改', status: 'completed', timestamp: '2026-10-05T08:00:00Z', durationMs: null, exitCode: null },
   ];
   return {
-    settings: { ...settings.value, ...currentPositionSettings() }, dark: true,
+    settings: { ...settings.value, ...currentPositionSettings() }, dark: true, appIconName,
     selection: { mode: 'following', connected: true, threadId: '00000000-0000-0000-0000-000000000001', routeCount: 1, title: 'Codex Token 状态条 · 演示聊天', source: 'desktop-navigation' },
     health: { fileCount: 6, sessionCount: 4, indexing: false, truncated: false, readErrors: 0 },
+    quota: { source: 'sample', plan: 'plus', recordedAt: Date.now(), windows: [
+      { minutes: 300, percent: 82, reset: Date.now() + 73 * 60 * 1000 },
+      { minutes: 10080, percent: 25, reset: Date.now() + 4 * 86400000 },
+    ] },
     session: {
       threadId: '00000000-0000-0000-0000-000000000001', model: 'Codex', hasUsage: true, active: false, updatedAt: new Date().toISOString(),
       totals: { input_tokens: 1820000, cached_input_tokens: 1430000, output_tokens: 24000, reasoning_output_tokens: 8500, total_tokens: 1844000 },
-      context: { used: 114400, capacity: 258400, percent: 44.2724, ...contextStatus(44.2724, 258400), exceeded: false }, cacheHitPercent: 78.57,
+      context: { used: 114400, capacity: 258400, percent: 44.2724, ...contextStatus(44.2724, 258400), exceeded: false, parts: { uncached: 36400, cached: 75600, output: 1600, reasoning: 800 } }, cacheHitPercent: 78.57,
       toolUsage: { total: 17, failed: 1, durationMs: 14000, timed: 12, records: toolRecords, byType: [{ type: 'CommandExecution', label: '命令执行', total: 11, failed: 1, durationMs: 11000, timed: 9 }, { type: 'FileChange', label: '文件修改', total: 6, failed: 0, durationMs: 3000, timed: 3 }] },
       turnToolUsage: { total: 3, failed: 1, durationMs: 2800, timed: 2, records: turnRecords, byType: [{ type: 'CommandExecution', label: '命令执行', total: 2, failed: 1, durationMs: 2800, timed: 2 }, { type: 'FileChange', label: '文件修改', total: 1, failed: 0, durationMs: 0, timed: 0 }] }, turnRequests: 2,
       turnTokens: { input_tokens: 85000, output_tokens: 1420, total_tokens: 86420 }, turnCount: 12,
@@ -431,7 +599,15 @@ async function smokeCheck() {
   settingsWindow.webContents.send('statusbar:snapshot', demoState());
   await new Promise(resolve => setTimeout(resolve, 2000));
   const settingsLayout = await settingsWindow.webContents.executeJavaScript(`({ ready: document.readyState, text: document.body.innerText, controls: document.querySelectorAll('[data-setting]').length, connection: document.getElementById('connection').textContent, diagnosticVersion: document.getElementById('diag-version').textContent })`);
-  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 23 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  if (settingsLayout.ready !== 'complete' || settingsLayout.controls !== 25 || !settingsLayout.connection.includes('已连接') || settingsLayout.diagnosticVersion !== displayVersion) throw new Error('Settings did not render correctly');
+  const captionLayout = await settingsWindow.webContents.executeJavaScript(`(() => {
+    const overlay = navigator.windowControlsOverlay;
+    const caption = document.querySelector('.settings-caption');
+    const icon = document.getElementById('settings-app-icon');
+    return overlay?.visible && caption.offsetWidth <= overlay.getTitlebarAreaRect().width + 1 &&
+      getComputedStyle(caption).appRegion === 'drag' && icon.complete && icon.naturalWidth > 0;
+  })()`);
+  if (!captionLayout) throw new Error('Settings caption or app icon did not render correctly');
   const opacityCheck = await require('./smoke-opacity.cjs').checkOpacity({ overlay, settingsWindow, settings, publish, artifactDirectory });
   const settingsUx = await require('./settings-ux-smoke.cjs').checkSettingsUx({ win: settingsWindow, overlay, settings, publish, artifactDirectory });
   const toolDetails = await settingsWindow.webContents.executeJavaScript(`(() => {
@@ -466,11 +642,14 @@ async function smokeCheck() {
   if (!toolDetails.emptyCleared) throw new Error('Previous tool records remained on an empty chat: ' + JSON.stringify(emptyState));
   fixtureOverride = null; publish();
   await new Promise(resolve => setTimeout(resolve, 200));
-  await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-display").click(); window.scrollTo(0, 0)');
+  await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-display").click()');
   await new Promise(resolve => setTimeout(resolve, 150));
   fs.writeFileSync(path.join(artifactDirectory, 'settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
-  const settingsFeatures = await require('./settings-smoke.cjs').checkSettingsFeatures({ win: settingsWindow, state: demoState(), settings, setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
-  const usageCheck = await require('./smoke-usage.cjs').checkUsage({ overlay, win: settingsWindow, settings, state: demoState(), setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
+  const settingsFeatures = await require('./settings-smoke.cjs').checkSettingsFeatures({ win: settingsWindow, overlay, state: demoState(), settings, setFixture: value => { fixtureOverride = value; publish(); }, artifactDirectory });
+  const usageCheck = await require('./smoke-usage.cjs').checkUsage({
+    overlay, win: settingsWindow, settings, state: demoState(), artifactDirectory,
+    setFixture(value, records = null) { fixtureOverride = value; fixtureRequests = records; publish(); },
+  });
   await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-diagnostics").click()');
   const settingsScroll = [];
   const settingsTypography = [];
@@ -478,17 +657,44 @@ async function smokeCheck() {
     settingsWindow.setSize(size.width, size.height);
     settingsWindow.focus();
     settingsWindow.webContents.focus();
-    await settingsWindow.webContents.executeJavaScript('window.scrollTo(0, 0); document.activeElement.blur()');
+    await settingsWindow.webContents.capturePage(undefined, { stayAwake: true });
+    let viewport;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      viewport = await settingsWindow.webContents.executeJavaScript('({ width: innerWidth, height: innerHeight })');
+      if (Math.abs(viewport.width - size.width) <= 1 && Math.abs(viewport.height - size.height) <= 1) break;
+      await new Promise(resolve => setTimeout(resolve, 75));
+    }
+    if (Math.abs(viewport.width - size.width) > 1 || Math.abs(viewport.height - size.height) > 1) {
+      throw new Error('Settings viewport failed to resize: ' + JSON.stringify({ size, viewport }));
+    }
+    const wheelPoint = await settingsWindow.webContents.executeJavaScript(`(() => {
+      const scroll = document.getElementById('settings-scroll');
+      scroll.scrollTop = 0;
+      scroll.focus({ preventScroll: true });
+      const bounds = scroll.getBoundingClientRect();
+      return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
+    })()`);
     await new Promise(resolve => setTimeout(resolve, 200));
-    settingsWindow.webContents.sendInputEvent({ type: 'mouseWheel', x: 80, y: 80, deltaY: -550, deltaX: 0, canScroll: true });
+    settingsWindow.webContents.sendInputEvent({ type: 'mouseWheel', ...wheelPoint, deltaY: -550, deltaX: 0, canScroll: true });
     await new Promise(resolve => setTimeout(resolve, 400));
-    const wheel = await settingsWindow.webContents.executeJavaScript('window.scrollY');
+    const wheel = await settingsWindow.webContents.executeJavaScript('document.getElementById("settings-scroll").scrollTop');
     settingsWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'End', modifiers: ['control'] });
     settingsWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'End', modifiers: ['control'] });
     await new Promise(resolve => setTimeout(resolve, 400));
-    const bottom = await settingsWindow.webContents.executeJavaScript(`({ scrollTop: window.scrollY, scrollHeight: document.scrollingElement.scrollHeight, clientHeight: document.scrollingElement.clientHeight, actionsVisible: document.getElementById('quit').getBoundingClientRect().bottom <= innerHeight && document.getElementById('quit').getBoundingClientRect().top >= 0 })`);
+    const bottom = await settingsWindow.webContents.executeJavaScript(`(() => {
+      const scroll = document.getElementById('settings-scroll');
+      const links = document.querySelector('.settings-links').getBoundingClientRect();
+      const footer = document.querySelector('.settings-actions').getBoundingClientRect();
+      const quit = document.getElementById('quit').getBoundingClientRect();
+      const scrollBottom = scroll.getBoundingClientRect().bottom;
+      return { scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight,
+        captionPinned: Math.abs(document.querySelector('.settings-titlebar').getBoundingClientRect().top) < 1,
+        actionsVisible: quit.bottom <= innerHeight + 1 && footer.bottom <= innerHeight + 1
+          && Math.abs(links.top - scrollBottom) < 1 && Math.abs(footer.top - links.bottom) < 1,
+        footerBounds: { top: footer.top, bottom: footer.bottom, scrollBottom, viewport: innerHeight } };
+    })()`);
     settingsScroll.push({ size, wheel, ...bottom });
-    if (bottom.scrollHeight > bottom.clientHeight && wheel <= 0 || !bottom.actionsVisible || bottom.scrollHeight - bottom.clientHeight - bottom.scrollTop > 2) throw new Error('Settings scrolling failed: ' + JSON.stringify(settingsScroll.at(-1)));
+    if (bottom.scrollHeight > bottom.clientHeight && wheel <= 0 || !bottom.captionPinned || !bottom.actionsVisible || bottom.scrollHeight - bottom.clientHeight - bottom.scrollTop > 2) throw new Error('Settings scrolling failed: ' + JSON.stringify(settingsScroll.at(-1)));
     const typography = await settingsWindow.webContents.executeJavaScript(`(() => {
       const status = document.getElementById('diag-window');
       const original = status.textContent;
@@ -500,7 +706,8 @@ async function smokeCheck() {
         const value = row.querySelector('strong').getBoundingClientRect();
         return label.height < 28 && value.left >= label.right + 10 && value.right <= row.getBoundingClientRect().right + 1 && row.scrollWidth <= row.clientWidth + 1;
       });
-      const result = { fits, valuesAligned: values.every(value => Math.abs(value.left - values[0].left) < 1), pageFits: document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth, longStatusLines: status.getBoundingClientRect().height / parseFloat(getComputedStyle(status).lineHeight) };
+      const scroll = document.getElementById('settings-scroll');
+      const result = { fits, valuesAligned: values.every(value => Math.abs(value.left - values[0].left) < 1), pageFits: scroll.scrollWidth <= scroll.clientWidth, longStatusLines: status.getBoundingClientRect().height / parseFloat(getComputedStyle(status).lineHeight) };
       status.textContent = original;
       return result;
     })()`);
@@ -513,14 +720,19 @@ async function smokeCheck() {
       document.getElementById('tool-details-heading').scrollIntoView();
       const table = document.querySelector('.tool-table-wrap');
       const records = document.getElementById('settings-tool-records');
-      return { pageFits: document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth, tableFits: table.scrollWidth <= table.clientWidth + 1, recordsFit: records.scrollWidth <= records.clientWidth + 1 };
+      const scroll = document.getElementById('settings-scroll');
+      return { pageFits: scroll.scrollWidth <= scroll.clientWidth, tableFits: table.scrollWidth <= table.clientWidth + 1, recordsFit: records.scrollWidth <= records.clientWidth + 1 };
     })()`);
     if (!toolsFit.pageFits || !toolsFit.tableFits || !toolsFit.recordsFit) throw new Error('Settings tool details overflow: ' + JSON.stringify(toolsFit));
     toolDetails[size.width] = toolsFit;
     await settingsWindow.webContents.executeJavaScript('document.getElementById("tool-classification").open = false');
     await new Promise(resolve => setTimeout(resolve, 150));
     fs.writeFileSync(path.join(artifactDirectory, 'settings-tools-' + size.width + '.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
-    await settingsWindow.webContents.executeJavaScript('document.getElementById("tab-diagnostics").click(); window.scrollTo(0, document.scrollingElement.scrollHeight)');
+    await settingsWindow.webContents.executeJavaScript(`(() => {
+      document.getElementById('tab-diagnostics').click();
+      const scroll = document.getElementById('settings-scroll');
+      scroll.scrollTop = scroll.scrollHeight;
+    })()`);
   }
   fs.writeFileSync(path.join(artifactDirectory, 'settings-bottom.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
   const previousSettings = { ...settings.value };
@@ -534,15 +746,19 @@ async function smokeCheck() {
   const hiddenText = await overlay.webContents.executeJavaScript(`(() => { document.getElementById('detail-tokens').querySelector('summary').click(); const result = { labelsHidden: [...document.querySelectorAll('.statusbar .k, .statusbar .route')].every(element => getComputedStyle(element).display === 'none'), valuesVisible: document.getElementById('speed').getBoundingClientRect().width > 0 && document.getElementById('speed').textContent.includes('28.4'), buttonsVisible: document.querySelector('[data-action=details]').getBoundingClientRect().width > 0 && document.querySelector('[data-action=settings]').getBoundingClientRect().width > 0, detailsReadable: document.getElementById('details').innerText.includes('输入 Token') && document.getElementById('tools-detail').innerText.includes('17 次') }; document.getElementById('detail-tokens').querySelector('summary').click(); return result; })()`);
   if (!reloadedSettings.value.hideLabels || Object.values(hiddenText).some(value => !value)) throw new Error('Hidden text setting failed: ' + JSON.stringify(hiddenText));
   const longDetails = demoState();
+  longDetails.session.totals = { ...longDetails.session.totals, input_tokens: 339556220, total_tokens: 339580220 };
   longDetails.selection.title = '验证隐藏文字及窄窗口下的长聊天标题显示，明细标题应自动换行且不会遮挡统计内容。'.repeat(3);
-  longDetails.settings.hideLabels = true;
   longDetails.session.turnToolUsage = { total: 45, failed: 0, timed: 30, durationMs: 111600, byType: [{ type: 'CommandExecution', label: '命令执行', total: 45, failed: 0, timed: 30, durationMs: 111600 }] };
   longDetails.session.toolUsage = { total: 211, failed: 16, timed: 151, durationMs: 499000, byType: [{ type: 'CommandExecution', label: '命令执行', total: 211, failed: 16, timed: 151, durationMs: 499000 }] };
-  overlay.webContents.send('statusbar:snapshot', longDetails);
+  fixtureOverride = longDetails;
+  publish();
   await new Promise(resolve => setTimeout(resolve, 400));
+  const longTotal = await overlay.webContents.executeJavaScript("(() => { const total = document.getElementById('total-detail'); return { displayed: total.textContent, tooltip: total.title }; })()");
+  if (longTotal.displayed !== '339.58M' || longTotal.tooltip !== '339,580,220 Token') throw new Error('Overview large total lost its compact label or exact value: ' + JSON.stringify(longTotal));
   const longDetailLayout = await overlay.webContents.executeJavaScript(`(() => { const panel = document.getElementById('details'); const label = document.getElementById('turn-tools-label'); const row = label.parentElement; const title = document.getElementById('chat-title'); return { labelWidth: label.getBoundingClientRect().width, labelHeight: label.getBoundingClientRect().height, valueWidth: document.getElementById('turn-tools-detail').getBoundingClientRect().width, rowHeight: row.getBoundingClientRect().height, shellFits: document.getElementById('shell').getBoundingClientRect().height <= document.documentElement.clientHeight + 2, titleFits: !title.hidden && title.scrollWidth <= title.clientWidth + 1 && panel.scrollWidth <= panel.clientWidth + 1, panelScrollable: panel.scrollHeight > panel.clientHeight }; })()`);
   if (longDetailLayout.labelWidth < 70 || longDetailLayout.labelHeight > 40 || !longDetailLayout.shellFits || !longDetailLayout.titleFits) throw new Error('Long details do not fit with hidden bar labels: ' + JSON.stringify(longDetailLayout));
   fs.writeFileSync(path.join(artifactDirectory, 'hidden-details.png'), (await overlay.webContents.capturePage()).toPNG());
+  fixtureOverride = null;
   const loaded = new Promise(resolve => settingsWindow.webContents.once('did-finish-load', resolve));
   settingsWindow.webContents.reload();
   await loaded;
@@ -556,12 +772,22 @@ async function smokeCheck() {
   const layout = await overlay.webContents.executeJavaScript(`({ width: document.documentElement.clientWidth, height: document.documentElement.clientHeight, overflow: document.querySelector('.zu-main').scrollWidth > document.querySelector('.zu-main').clientWidth, bodyText: document.body.innerText, panels: document.querySelectorAll('.panel.open').length })`);
   if (layout.overflow || !layout.bodyText.includes('28.4') || layout.panels !== 1) throw new Error('Statusbar did not render correctly');
   const previousHost = lastHost;
-  settings.update({ showSpeed: true, showContext: true, showSession: true, showTurn: true, showToday: true, showCache: true, showTools: true, scale: 1.5 });
+  settings.update({ showSpeed: true, showContext: true, showTtft: true, showSession: true, showTurn: true, showToday: true, showCache: true, showTools: true, metricOrder: ['ttft', 'speed', 'context'], scale: 1.5 });
   publish();
   lastHost = { ...screen.getPrimaryDisplay().workArea, width: 350 };
   positionOverlay();
   await new Promise(resolve => setTimeout(resolve, 600));
-  const narrow = await overlay.webContents.executeJavaScript(`({ compact: document.getElementById('shell').classList.contains('compact'), hidden: document.querySelectorAll('.metric.overflowed').length, extraHidden: document.querySelectorAll('.metric.overflowed[data-metric=today], .metric.overflowed[data-metric=cache]').length, more: document.getElementById('more-count').textContent, barFits: document.getElementById('bar').scrollWidth <= document.getElementById('bar').clientWidth + 1, metricsFit: document.getElementById('metrics').scrollWidth <= document.getElementById('metrics').clientWidth + 1, detailsList: document.getElementById('overflow-list').children.length, visibleMetrics: document.querySelectorAll('.metric:not([hidden]):not(.overflowed)').length })`);
+  const narrow = await overlay.webContents.executeJavaScript(`(() => {
+    const visible = document.querySelectorAll('.metric:not([hidden]):not(.overflowed)');
+    return { compact: document.getElementById('shell').classList.contains('compact'),
+      hidden: document.querySelectorAll('.metric.overflowed').length,
+      extraHidden: document.querySelectorAll('.metric.overflowed[data-metric=today], .metric.overflowed[data-metric=cache]').length,
+      more: document.getElementById('more-count').textContent,
+      barFits: document.getElementById('bar').scrollWidth <= document.getElementById('bar').clientWidth + 1,
+      metricsFit: document.getElementById('metrics').scrollWidth <= document.getElementById('metrics').clientWidth + 1,
+      detailsList: document.getElementById('overflow-list').children.length,
+      visibleMetrics: visible.length, firstVisible: visible[0]?.dataset.metric };
+  })()`);
   const overflowActions = await overlay.webContents.executeJavaScript(`(async () => {
     document.getElementById('tab-overview').click();
     const button = document.querySelector('[data-action=details]'), panel = document.getElementById('details'), badge = document.getElementById('more-count');
@@ -585,7 +811,7 @@ async function smokeCheck() {
   positionOverlay();
   await new Promise(resolve => setTimeout(resolve, 300));
   const expandedAgain = await overlay.webContents.executeJavaScript("!document.getElementById('shell').classList.contains('compact') && getComputedStyle(document.querySelector('.statusbar .k')).display !== 'none'");
-  if (!narrow.compact || narrow.hidden < 1 || !narrow.visibleMetrics || !narrow.barFits || !narrow.metricsFit || narrow.detailsList !== narrow.extraHidden || !expandedAgain) throw new Error('Window resizing did not preserve all metric access: ' + JSON.stringify(narrow));
+  if (!narrow.compact || narrow.hidden < 1 || narrow.firstVisible !== 'ttft' || !narrow.barFits || !narrow.metricsFit || narrow.detailsList !== narrow.extraHidden || !expandedAgain) throw new Error('Window resizing did not preserve metric priority and access: ' + JSON.stringify(narrow));
   const docking = await smokeDocking();
   const interactions = process.argv.includes('--smoke-no-mouse') ? { skipped: true } : await require('./smoke-interactions.cjs').checkInteractions({ overlay, settingsWindow, settings, publish, positionOverlay, artifactDirectory });
   const report = { layout, settingsLayout, settingsScroll, settingsTypography, toolDetails, hiddenText, longDetailLayout, interactions, settingsPersistence: { uiChangeSaved: true, freshStoreRestored: true, reloadedControlRestored: true }, responsiveLabels: narrow.compact && expandedAgain, narrowOverflow: narrow, health: latest.health, ipcConnected: ipc.connected, selectionMode: latest.selection.mode, hasUsage: latest.session?.hasUsage ?? false };
@@ -670,7 +896,7 @@ async function smokeDocking() {
         if (!passed) throw new Error('Titlebar fit/alignment/downward details failed: ' + alignment + ' open=' + open);
       }
     }
-    await settingsWindow.webContents.executeJavaScript("document.getElementById('tab-display').click(); document.getElementById('composer-alignment').scrollIntoView({block:'center'});");
+    await settingsWindow.webContents.executeJavaScript("document.getElementById('tab-position').click(); document.getElementById('composer-alignment').scrollIntoView({block:'center'});");
     if (settingsWindow.isMinimized()) settingsWindow.restore(); settingsWindow.showInactive(); await wait(200);
     fs.writeFileSync(path.join(artifactDirectory, 'composer-alignment-settings.png'), (await settingsWindow.webContents.capturePage(undefined, { stayAwake: true })).toPNG());
     composerSample.at = Date.now() - 4000; positionOverlay();
@@ -696,16 +922,17 @@ else {
     if (args.includes('--autostart')) return;
     manuallyHidden = false;
     positionOverlay();
-    openSettings();
+    openSettings(args.includes('--updates') || isNotificationLaunch(args) ? 'updates' : undefined);
   });
   app.whenReady().then(async () => {
     settings = new SettingsStore(app.getPath('userData'));
+    lastNotifiedRelease = settings.value.lastNotifiedRelease;
     store = new SessionStore(undefined, { cacheDirectory: smoke || demo ? null : app.getPath('userData') });
     ipc = new CodexIpc();
     // Renderers cannot request remote resources. Update checks use an isolated,
     // in-memory session with a single allowed endpoint and no credentials.
     session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_, callback) => callback({ cancel: true }));
-    const updateSession = session.fromPartition('codex-token-update', { cache: false });
+    updateSession = session.fromPartition('codex-token-update', { cache: false });
     updateSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: details.url !== UPDATE_URL || details.method !== 'GET' }));
     createOverlay();
     if (!smoke && !demo) buildTray();
@@ -717,16 +944,25 @@ else {
     });
     ipcMain.on('statusbar:drag', (event, action, point) => { if (event.sender === overlay.webContents && ['start', 'move', 'end', 'cancel'].includes(action)) dragOverlay(action, point); });
     ipcMain.on('statusbar:opacity-preview', (event, value) => { if (settingsWindow && event.sender === settingsWindow.webContents) previewOpacity(value); });
-    ipcMain.on('statusbar:open-settings', event => { if (validSender(event)) openSettings(); });
+    ipcMain.on('statusbar:open-settings', (event, pane) => { if (validSender(event)) openSettings(pane); });
     ipcMain.handle('statusbar:restore-position', event => {
       if (!validSender(event)) throw new Error('Invalid sender');
       try { restorePosition(); return { ok: true }; } catch (error) { return settingsFailure(error); }
     });
-    ipcMain.on('statusbar:refresh', event => { if (validSender(event)) { ipc.refreshBinding(); store.scan(); } });
+    ipcMain.on('statusbar:refresh', event => { if (validSender(event)) refreshData(); });
     ipcMain.on('statusbar:tool-interest', (event, enabled) => {
       if (event.sender !== settingsWindow?.webContents) return;
       settingsWantsTools = enabled === true;
       queuePublish();
+    });
+    ipcMain.handle('statusbar:model-requests', (event, threadId, filters) => {
+      if (!validSender(event)) throw new Error('Invalid sender');
+      if (!threadId) return null;
+      if (fixtureOverride || previewFixture || demo) {
+        const selected = fixtureOverride ? fixtureOverride.session : demoState().session;
+        return threadId === selected?.threadId ? requestPage(fixtureRequests, filters) : null;
+      }
+      return threadId === latest?.session?.threadId ? store.modelRequests(threadId, filters) : null;
     });
     ipcMain.handle('statusbar:copy-diagnostics', event => {
       if (event.sender !== settingsWindow?.webContents) throw new Error('Invalid sender');
@@ -739,32 +975,25 @@ else {
       if (!smoke) await shell.openExternal(RELEASE_URL);
       return { ok: true };
     });
+    ipcMain.handle('statusbar:open-settings-link', async (event, url) => {
+      if (event.sender !== settingsWindow?.webContents || !settingsLinks.has(url)) throw new Error('Invalid settings link');
+      if (!smoke) await shell.openExternal(url);
+    });
     ipcMain.handle('statusbar:check-update', async event => {
       if (event.sender !== settingsWindow?.webContents) throw new Error('Invalid sender');
-      if (smoke) return { ok: true, tag: 'V99.0', newer: true };
-      if (!updateRequest) updateRequest = (async () => {
-        try {
-          const response = await updateSession.fetch(UPDATE_URL, { credentials: 'omit', headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'CodexTokenStatusbar' }, signal: AbortSignal.timeout(10000) });
-          if (!response.ok) throw new Error('update-http-error');
-          const text = await response.text();
-          if (text.length > 256000) throw new Error('update-response-limit');
-          const release = JSON.parse(text);
-          if (!versionParts(release.tag_name) || release.draft || release.prerelease) throw new Error('update-invalid-release');
-          return { ok: true, tag: release.tag_name, newer: newerVersion(release.tag_name, displayVersion) };
-        } catch { return { ok: false, message: '暂时无法检查更新，可直接打开 GitHub 发布页。' }; }
-        finally { updateRequest = null; }
-      })();
-      return updateRequest;
+      return checkUpdates();
     });
     ipcMain.on('statusbar:quit', event => { if (validSender(event)) app.quit(); });
     ipcMain.handle('statusbar:settings', (event, patch) => {
       if (!validSender(event)) throw new Error('Invalid sender');
       let value;
+      const previousUpdateMode = settings.value.updateMode;
       try { value = updatePositionSettings(patch); }
       catch (error) {
         if (patch && Object.hasOwn(patch, 'opacity')) previewOpacity(null);
         return settingsFailure(error);
       }
+      if (value.updateMode !== previousUpdateMode) scheduleUpdateCheck();
       publish();
       if (patch && Object.hasOwn(patch, 'opacity')) previewOpacity(null);
       positionOverlay();
@@ -787,6 +1016,13 @@ else {
     await store.start();
     publish();
     watchWindows();
+    void refreshQuota();
+    if (nativeUpdates) Notification.handleActivation(details => {
+      if (details.type === 'click' && details.arguments === updateActivation) openUpdateNotification();
+    });
+    scheduleUpdateCheck();
+    if (isNotificationLaunch(process.argv)) openUpdateNotification();
+    else if (process.argv.includes('--updates') && !smoke && !demo) openSettings('updates');
     if (!smoke && !demo) watcherWatchdog = setInterval(checkWatcher, 1000);
     if (demo) overlay.webContents.once('did-finish-load', () => overlay.webContents.send('statusbar:snapshot', demoState()));
     if (smoke) smokeCheck().catch(error => { console.error(error.stack ?? error.message); app.exit(1); });
@@ -796,6 +1032,9 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   quitting = true;
   clearTimeout(publishTimer);
+  clearTimeout(updateTimer);
+  clearTimeout(quotaTimer);
+  quotaRequest?.abort();
   clearInterval(watcherWatchdog);
   ipc?.stop();
   navigation?.stop();

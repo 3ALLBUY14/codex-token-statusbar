@@ -1,10 +1,12 @@
 'use strict';
 (() => {
   const names = { task: '主任务', subagent: '子代理', review: '自动审查', unknown: '来源未记录', history: '历史未归属' };
+  const tones = { task: 'blue', subagent: 'violet', review: 'teal', unknown: 'muted', history: 'amber' };
   const count = n => Number.isFinite(n) ? n.toLocaleString('zh-CN') : '未记录';
   function node(tag, value, className) { const n = document.createElement(tag); if (value !== undefined) n.textContent = value; if (className) n.className = className; return n; }
   globalThis.renderUsageDetails = (container, session) => {
-    const data = session?.accounting, signature = JSON.stringify(data ?? null);
+    const data = session?.accounting;
+    const signature = JSON.stringify(data && [data.method, data.relatedThreads, data.totals, data.requests, data.partial, data.unassignedTokens, data.byModel, data.bySource, data.related]);
     if (container.dataset.signature === signature) return;
     container.dataset.signature = signature;
     const oldScope = container.querySelector('select')?.value ?? 'current';
@@ -19,13 +21,19 @@
     function render() {
       const report = scope.value === 'related' ? data.related : data;
       body.replaceChildren();
-      body.append(node('p', `${data.method === 'response' ? '逐请求记录优先，按响应标识去重' : '旧格式累计记录，模型归属不补猜'}。${report.partial ? '统计范围不完整或存在冲突，仅展示可核实记录。' : '以下为本机已记录范围，不等同于账单。'}`, 'settings-note'));
-      body.append(node('p', `已记录用量 ${count(report.totals.total_tokens)} Token · 已记录请求 ${count(report.requests)}`, 'usage-total'));
-      if (report.unassignedTokens > 0) body.append(node('p', `其中历史未归属 ${count(report.unassignedTokens)} Token，已计入会话累计，不重复相加；模型明细仅覆盖有逐请求记录的部分。`, 'settings-note'));
+      const total = node('p', undefined, 'usage-total');
+      total.append(node('strong', `${count(report.totals.total_tokens)} Token`), ` · 已记录请求 ${count(report.requests)}`);
+      body.append(total);
       const sources = node('div', undefined, 'usage-sources');
       for (const row of report.bySource) {
         const line = node('div'), pct = report.totals.total_tokens ? row.total_tokens * 100 / report.totals.total_tokens : 0;
-        line.append(node('span', names[row.source] ?? names.unknown), node('strong', `${count(row.total_tokens)} · ${pct.toFixed(1)}%`)); sources.append(line);
+        line.dataset.tone = tones[row.source] ?? 'muted';
+        const track = node('span', undefined, 'monitor-progress'), fill = node('i');
+        track.setAttribute('aria-hidden', 'true');
+        fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+        track.append(fill);
+        line.append(node('span', names[row.source] ?? names.unknown, 'semantic-key'), node('strong', `${count(row.total_tokens)} · ${pct.toFixed(1)}%`), track);
+        sources.append(line);
       }
       body.append(sources);
       const wrap = node('div', undefined, 'usage-table-wrap'), table = node('table', undefined, 'usage-models');
@@ -41,6 +49,8 @@
       table.append(rows); wrap.append(table); body.append(wrap);
       if (report.byModel.length > 30) body.append(node('p', `显示用量最多的 30 个模型，总量包含其余 ${report.byModel.length - 30} 个模型。`, 'settings-note'));
       if (!report.byModel.length) body.append(node('p', '等待已记录用量。', 'settings-note'));
+      if (report.unassignedTokens > 0) body.append(node('p', `历史未归属 ${count(report.unassignedTokens)} Token 已计入会话累计。模型明细只覆盖可归属的记录。`, 'settings-note'));
+      body.append(node('p', `${data.method === 'response' ? '按响应标识去重' : '来自旧格式累计记录'}。${report.partial ? '部分日志不完整或存在冲突，已显示可核实的记录。' : '统计范围为本机已记录用量。'}`, 'settings-note'));
     }
     scope.addEventListener('change', render); render(); if (focused) scope.focus({ preventScroll: true });
   };

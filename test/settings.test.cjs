@@ -25,6 +25,25 @@ test('settings survive updates and a fresh store', t => {
   assert.equal(restored.value.offsetX, -1300);
 });
 
+test('metric order ignores invalid ids, preserves chosen priorities and can display TTFT on its own', t => {
+  const { directory, store } = temporaryStore(t);
+  store.update({ metricOrder: ['ttft', 'tools', 'ttft', 'invalid'], showTtft: true, showSpeed: false, showContext: false, showSession: false });
+  const settings = new SettingsStore(directory).value;
+  assert.deepEqual(settings.metricOrder, ['ttft', 'tools', 'speed', 'context', 'session', 'turn', 'today', 'cache']);
+  assert.equal(settings.showTtft, true);
+  assert.equal(settings.showContext, false);
+});
+
+test('update reminders default to a badge and remember the last notified release', t => {
+  const { directory, store } = temporaryStore(t);
+  assert.equal(store.value.updateMode, 'badge');
+  store.update({ updateMode: 'popup', lastNotifiedRelease: 'V2.1' });
+  store.update({ updateMode: 'manual', lastNotifiedRelease: 'V9-beta' });
+  const restored = new SettingsStore(directory);
+  assert.equal(restored.value.updateMode, 'manual');
+  assert.equal(restored.value.lastNotifiedRelease, 'V2.1');
+});
+
 test('EXDEV on rename falls back to copying and persists repeated changes', t => {
   const { directory, store } = temporaryStore(t);
   t.mock.method(fs, 'renameSync', () => { throw Object.assign(new Error('Cross-device rename'), { code: 'EXDEV' }); });

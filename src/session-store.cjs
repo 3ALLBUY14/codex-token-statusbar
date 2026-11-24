@@ -8,7 +8,7 @@ const { EventEmitter } = require('node:events');
 const { SessionAccumulator, JsonlDecoder, emptyUsage, localDay } = require('./metrics.cjs');
 const { UUID } = require('./codex-ipc.cjs');
 const { StatisticsCache, fingerprint } = require('./statistics-cache.cjs');
-const { ResponseLedger, buildUsageIndex, accountingFor } = require('./response-usage.cjs');
+const { ResponseLedger, buildUsageIndex, accountingFor, activityFor, requestPage } = require('./response-usage.cjs');
 const CACHE_VERSION = require('node:crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'metrics.cjs'))).update(fs.readFileSync(path.join(__dirname, 'response-usage.cjs'))).update('snapshot-v2:' + Intl.DateTimeFormat().resolvedOptions().timeZone).digest('hex');
 
 const CHUNK = 256 * 1024;
@@ -42,6 +42,7 @@ class FileTail {
           this.offset = stat.size; this.mtimeMs = stat.mtimeMs; this.identity = identity; this.fingerprint = saved.fingerprint; this.complete = true;
           this.decoder.skippedLines = saved.skippedLines;
           Object.assign(this.accumulator, { id: saved.snapshot.threadId, parentId: saved.parentId ?? null, model: saved.snapshot.model, source: saved.isRootDesktop ? 'desktop' : null, totals: saved.snapshot.totals, hasUsage: saved.snapshot.hasUsage, accountingWarning: saved.snapshot.accountingWarning, usageIncomplete: saved.snapshot.usageIncomplete, daily: new Map(saved.daily) });
+          this.accumulator.quota = saved.quota ?? null;
           return { consumed: 0, pending: false, error: null, cacheHit: true };
         }
         // A snapshot cannot resume parsing. Rebuild only the changed file.
@@ -91,7 +92,7 @@ class FileTail {
     // Response identities must be replayed for cross-file deduplication.
     if (this.ledger.records.size || this.ledger.invalid || this.ledger.limited) return null;
     if (!this.complete || !this.fingerprint || this.accumulator.activeTurn || !UUID.test(this.accumulator.id ?? '')) return null;
-    return { size: this.offset, mtimeMs: this.mtimeMs, identity: this.identity, fingerprint: this.fingerprint, snapshot: this.snapshot(), parentId: this.accumulator.parentId, isRootDesktop: this.accumulator.isRootDesktop, daily: [...this.accumulator.daily], skippedLines: this.decoder.skippedLines };
+    return { size: this.offset, mtimeMs: this.mtimeMs, identity: this.identity, fingerprint: this.fingerprint, snapshot: this.snapshot(), quota: this.accumulator.quota, parentId: this.accumulator.parentId, isRootDesktop: this.accumulator.isRootDesktop, daily: [...this.accumulator.daily], skippedLines: this.decoder.skippedLines };
   }
 }
 
@@ -236,11 +237,23 @@ class SessionStore extends EventEmitter {
   }
   snapshot(settings = {}, ipc = {}, { includeRecords = true, includeSessions = true } = {}) {
     const sessions = this.sessions();
-    if (this.usageIndexRevision !== this.revision || !this.usageIndex) { this.usageIndex = buildUsageIndex(this.files.values(), sessions); this.usageIndexRevision = this.revision; this.accountingCache = new Map(); }
+    const now = Date.now(), day = localDay(now);
+    if (this.usageIndexRevision !== this.revision || !this.usageIndex) {
+      this.usageIndex = buildUsageIndex(this.files.values(), sessions);
+      this.usageIndexRevision = this.revision;
+      this.activityDay = null;
+    }
     const usageIndex = this.usageIndex;
-    const day = localDay(Date.now());
+    if (this.activityDay !== day) {
+      this.activityDay = day;
+      this.allActivity = activityFor(usageIndex, sessions, null, now);
+      this.accountingCache = new Map();
+    }
     const today = emptyUsage();
+    let quota = null;
     for (const tail of sessions) {
+      const sample = tail.accumulator.quota;
+      if (tail.accumulator.isRootDesktop && sample && (!quota || sample.recordedAt > quota.recordedAt)) quota = sample;
       const bucket = usageIndex.groups.get(tail.accumulator.id)?.daily.get(day) ?? (!usageIndex.groups.has(tail.accumulator.id) ? tail.accumulator.daily.get(day) : null);
       if (bucket) for (const key of Object.keys(today)) today[key] += bucket[key];
     }
@@ -267,7 +280,12 @@ class SessionStore extends EventEmitter {
     selected ??= selectedId ? sessions.find(tail => tail.accumulator.id === selectedId) : null;
     const session = selected ? structuredClone(selected.snapshot(includeRecords)) : null;
     if (session) {
-      if (!this.accountingCache.has(selectedId)) this.accountingCache.set(selectedId, accountingFor(selectedId, usageIndex, sessions, this.cumulativeTotals));
+      if (!this.accountingCache.has(selectedId)) {
+        const accounting = accountingFor(selectedId, usageIndex, sessions, this.cumulativeTotals);
+        const activity = activityFor(usageIndex, [selected], selectedId, now);
+        activity.partial ||= accounting.partial;
+        this.accountingCache.set(selectedId, { ...accounting, activity });
+      }
       session.accounting = structuredClone(this.accountingCache.get(selectedId));
       if (session.accounting.method === 'response' || session.accounting.unassignedTokens > 0) {
         session.totals = { ...session.accounting.totals }; session.hasUsage = session.hasUsage || session.accounting.requests > 0 || session.totals.total_tokens > 0;
@@ -277,6 +295,9 @@ class SessionStore extends EventEmitter {
     }
     return {
       session,
+      quota: quota ? structuredClone(quota) : null,
+      allActivity: { days: structuredClone(this.allActivity.days), partial: this.allActivity.partial || this.indexing || this.truncated || this.readErrors > 0 },
+      usageRevision: this.revision,
       selection: { mode, threadId: selectedId, source: ipc.source ?? null, confidence: mode === 'pinned' ? 'manual' : ipc.confidence ?? 'unknown', reason: ipc.reason ?? null, connected: Boolean(ipc.connected), routeCount: ipc.routeCount ?? 0 },
       today: { day, usage: today, partial: this.indexing || this.truncated || this.readErrors > 0 || usageIndex.bad.size > 0 || [...usageIndex.groups.values()].some(g => g.partial) || sessions.some(tail => tail.accumulator.accountingWarning || tail.accumulator.usageIncomplete || tail.decoder.skippedLines > 0) },
       sessions: includeSessions ? sessions.filter(tail => tail.accumulator.isRootDesktop).map(tail => ({
@@ -287,6 +308,9 @@ class SessionStore extends EventEmitter {
       })) : [],
       health: { fileCount: this.files.size, sessionCount: sessions.length, indexing: this.indexing, truncated: this.truncated, readErrors: this.readErrors, cacheHits: this.cacheHits, cacheError: this.cache?.error ?? null },
     };
+  }
+  modelRequests(threadId, filters) {
+    return requestPage(this.usageIndex?.groups.get(threadId), filters);
   }
   async flushCache() {
     if (!this.cache || !this.cacheDirty || this.busy) return;

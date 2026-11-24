@@ -28,6 +28,17 @@ test('context can fall after compaction without lowering session cumulative toke
   assert.equal(result.snapshot().totals.total_tokens, 1320);
 });
 
+test('context breakdown uses the latest call and shows only reconciled components', () => {
+  const result = accumulator(), recent = total(100, 20, 60, 8), sum = total(500, 90, 250, 36);
+  result.processEvent(count(sum, recent));
+  assert.deepEqual(result.snapshot().context.parts, { uncached: 40, cached: 60, output: 12, reasoning: 8 });
+  result.processEvent(count(sum, { input_tokens: 100, output_tokens: 20, total_tokens: 120 }));
+  assert.deepEqual(result.snapshot().context.parts, { input: 100, combinedOutput: 20 });
+  result.processEvent(count(sum, { ...recent, total_tokens: 155 }));
+  assert.equal(result.snapshot().context.used, 155);
+  assert.equal(result.snapshot().context.parts, null);
+});
+
 test('context warnings use a lower threshold for million-token windows, and explicit overflow survives until the next turn', () => {
   assert.equal(contextStatus(39.9, 1000000).level, 'normal');
   assert.equal(contextStatus(40, 1000000).level, 'warning');

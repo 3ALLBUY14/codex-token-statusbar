@@ -11,69 +11,129 @@
 <body>
   <main class="shell" id="shell">
     <div class="zusage-root statusbar" id="bar">
-      <button class="identity btn" data-action="details" aria-label="展开或收起明细" aria-expanded="false"><span class="brand-mark">C</span><span class="route" id="route">连接中</span><span class="more-count" id="more-count" hidden></span></button>
-      <span class="sep"></span>
+      <button class="identity btn" data-action="details" aria-label="展开或收起明细" aria-expanded="false"><span class="brand-mark">C</span><span class="activity" id="activity" role="img" aria-label="当前聊天活动状态">●</span><span class="route" id="route">连接中</span><span class="more-count" id="more-count" hidden></span></button>
       <div class="zu-main" id="metrics">
         <div class="it metric" data-metric="speed"><span class="k">均速</span><span class="v ok" id="speed">—</span><span class="dim">t/s</span></div>
-        <div class="it metric" data-metric="context"><span class="k">上下文</span><span class="cbar" id="context-bar"><i id="context-fill"></i></span><span class="pct" id="context">—</span></div>
+        <div class="it metric" data-metric="context"><span class="k">上下文</span><span class="context-ring" id="context-bar" aria-hidden="true"></span><span class="pct" id="context">—</span></div>
+        <div class="it metric" data-metric="ttft" title="上一轮首 Token 延迟" hidden><span class="k">首 Token</span><span class="v" id="ttft">—</span></div>
         <div class="it metric" data-metric="session"><span class="k">会话</span><span class="v" id="session">—</span></div>
         <div class="it metric" data-metric="turn"><span class="k" id="turn-label">本轮</span><span class="v" id="turn">—</span></div>
         <div class="it metric" data-metric="today"><span class="k">今日</span><span class="v" id="today">—</span></div>
         <div class="it metric" data-metric="cache"><span class="k">缓存</span><span class="v" id="cache">—</span></div>
         <div class="it metric" data-metric="tools"><span class="k">工具</span><span class="v" id="tools">—</span><span class="tool-failed" id="tool-failed"></span></div>
       </div>
-      <span class="sep"></span>
-      <span class="activity" id="activity" aria-label="当前聊天活动状态">●</span>
-      <button class="btn zu-gear" data-action="settings" aria-label="设置">⚙</button>
+      <button class="btn zu-gear" id="gear" data-action="settings" aria-label="设置" title="设置">⚙</button>
     </div>
     <section class="panel details" id="details" aria-label="用量明细">
-      <div class="detail-heading"><div><strong>当前聊天</strong><span class="pver" id="binding">等待数据</span></div><span class="dim">点击 C 收起</span></div>
-      <p class="chat-title" id="chat-title" hidden></p>
-      <div class="model-line"><span id="model">—</span><div class="detail-page-tabs" role="tablist" aria-label="用量视图"><button id="tab-overview" role="tab" aria-selected="true" aria-controls="overview-panel">总览</button><button id="tab-models" role="tab" aria-selected="false" tabindex="-1" aria-controls="models-panel">模型</button><button id="tab-activity" role="tab" aria-selected="false" tabindex="-1" aria-controls="activity-panel">活动</button></div><span class="dim" id="thread">—</span></div>
+      <header class="detail-identity">
+        <div class="detail-chat">
+          <h1 id="chat-title">当前聊天</h1>
+          <div class="model-line"><span id="model">—</span><span id="binding">等待数据</span><span class="dim" id="thread">—</span></div>
+        </div>
+        <div class="detail-actions">
+          <span id="chat-run-state" class="chat-run-state">等待记录</span>
+          <button type="button" class="panel-action" data-action="refresh" aria-label="刷新用量与额度" title="刷新用量与额度">↻</button>
+        </div>
+      </header>
+      <nav class="detail-page-tabs" role="tablist" aria-label="用量视图">
+        <button id="tab-overview" role="tab" aria-selected="true" aria-controls="overview-panel"><i class="ui-icon" data-icon="gauge" aria-hidden="true"></i>总览</button>
+        <button id="tab-activity" role="tab" aria-selected="false" tabindex="-1" aria-controls="activity-panel"><i class="ui-icon" data-icon="bars" aria-hidden="true"></i>用量</button>
+        <button id="tab-models" role="tab" aria-selected="false" tabindex="-1" aria-controls="models-panel"><i class="ui-icon" data-icon="stack" aria-hidden="true"></i><span id="model-tab-label">模型</span></button>
+        <button id="tab-requests" role="tab" aria-selected="false" tabindex="-1" aria-controls="requests-panel"><i class="ui-icon" data-icon="list" aria-hidden="true"></i>请求</button>
+      </nav>
       <div id="overview-panel" role="tabpanel" aria-labelledby="tab-overview">
-      <div class="numbers">
-        <div><span>会话累计 <small>跨模型 · 输入＋输出</small></span><strong id="total-detail">—</strong></div>
-        <div><span>上下文 <small id="context-origin">最新调用</small></span><strong id="context-detail">—</strong></div>
-        <div><span id="turn-total-label">上轮 Token</span><strong id="turn-total-detail">—</strong></div>
-        <div><span>上一轮平均输出速度</span><strong id="speed-detail">—</strong></div>
-        <div><span id="turn-requests-label">上轮模型请求</span><strong id="turn-requests-detail">—</strong></div>
-        <div><span id="turn-tools-label">上轮工具调用</span><strong id="turn-tools-detail">—</strong></div>
-        <div><span>工具调用 <small>已记录的完成项</small></span><strong id="tools-detail">—</strong></div>
+      <div class="monitor-kpis overview-kpis" aria-label="关键指标">
+        <div class="monitor-tile" data-tone="blue"><span>上轮均速<i class="ui-icon" data-icon="gauge" aria-hidden="true"></i></span><strong id="speed-detail">—</strong></div>
+        <div class="monitor-tile" data-tone="violet"><span>首 Token<i class="ui-icon" data-icon="clock" aria-hidden="true"></i></span><strong id="ttft-detail" title="上一轮首 Token 延迟">—</strong></div>
+        <div class="monitor-tile" data-tone="teal"><span>会话累计<i class="ui-icon" data-icon="stack" aria-hidden="true"></i></span><strong id="total-detail">—</strong></div>
+        <div class="monitor-tile" data-tone="amber"><span><span id="turn-total-label">上轮 Token</span><i class="ui-icon" data-icon="bolt" aria-hidden="true"></i></span><strong id="turn-total-detail">—</strong></div>
+      </div>
+      <section class="monitor-section context-section" aria-labelledby="context-heading">
+        <div class="monitor-section-heading"><div><h2 id="context-heading" class="icon-heading"><i class="ui-icon" data-icon="scope" aria-hidden="true"></i>上下文窗口</h2><span id="context-state"></span></div><strong id="context-detail-percent">—</strong></div>
+        <div class="monitor-progress" id="context-meter" role="meter" aria-label="上下文窗口占用" aria-valuemin="0" aria-valuemax="100"><i id="context-meter-fill"></i></div>
+        <div class="monitor-section-meta"><span id="context-origin">最新调用</span><strong id="context-detail">—</strong></div>
+        <dl class="context-parts" id="context-parts" aria-label="最新调用的上下文 Token 构成" hidden></dl>
+        <div class="context-legend" id="context-legend" hidden><span class="semantic-key" data-tone="teal">正常</span><span class="semantic-key" id="context-warning-label" data-tone="amber"></span><span class="semantic-key" id="context-critical-label" data-tone="rose"></span></div>
+      </section>
+      <section class="monitor-section quota-section" aria-labelledby="quota-heading">
+        <div class="monitor-section-heading"><h2 id="quota-heading" class="icon-heading"><i class="ui-icon" data-icon="gauge" aria-hidden="true"></i>可用额度</h2><span id="quota-plan"></span></div>
+        <div id="quota-windows"></div>
+        <p class="quota-record" id="quota-record">暂无本地额度记录</p>
+      </section>
+      <button type="button" id="state-note" class="state-note" aria-controls="detail-explanation" hidden></button>
+      <div class="numbers monitor-section overview-round">
+        <div><span class="semantic-key" data-tone="blue" id="turn-requests-label">上轮模型请求</span><strong id="turn-requests-detail">—</strong></div>
+        <div><span class="semantic-key" data-tone="violet" id="turn-tools-label">上轮工具调用</span><strong id="turn-tools-detail">—</strong></div>
+        <div><span class="semantic-key" data-tone="teal">会话工具</span><strong id="tools-detail">—</strong></div>
       </div>
       <div class="overflow-list" id="overflow-list" hidden></div>
-      <details class="detail-extra" id="detail-tokens"><summary>Token 构成与轮次耗时</summary><div class="numbers">
-        <div><span>输入 Token</span><strong id="input-detail">—</strong></div>
-        <div><span>缓存输入 <small>已包含在输入中</small></span><strong id="cached-detail">—</strong></div>
-        <div><span>输出 Token</span><strong id="output-detail">—</strong></div>
-        <div><span>推理输出 <small>已包含在输出中</small></span><strong id="reasoning-detail">—</strong></div>
-        <div><span>上一轮耗时 / 首 Token</span><strong id="time-detail">—</strong></div>
-      </div></details>
-      <details class="detail-extra" id="detail-usage"><summary>用量来源与模型</summary><div id="usage-details"></div></details>
-      <details class="detail-extra" id="detail-tools"><summary>工具分类</summary><div class="tool-breakdown" id="turn-tool-breakdown"></div><div class="tool-breakdown" id="tool-breakdown"></div></details>
-      <details class="detail-extra" id="detail-explanation"><summary>指标说明</summary><p class="speed-note" id="speed-note">平均速度包含工具执行和多次模型调用，不能代表纯生成速度。</p></details>
-      <p class="state-note" id="state-note"></p>
+      <details class="detail-extra" id="detail-tokens">
+        <summary><span>Token 构成与轮次耗时</span><small id="token-fold-summary"></small></summary>
+        <div class="disclosure-body">
+          <div class="token-compose" id="token-compose" hidden>
+            <div class="token-stack" aria-hidden="true"><i class="token-new"></i><i class="token-cached"></i><i class="token-output"></i></div>
+            <div class="token-key"><span><i class="token-new"></i>新输入 <b id="new-input-detail"></b></span><span><i class="token-cached"></i>缓存输入</span><span><i class="token-output"></i>输出</span></div>
+          </div>
+          <dl class="fold-metrics">
+            <div><dt>输入 Token</dt><dd id="input-detail">—</dd></div>
+            <div><dt>缓存输入<small>计入输入</small></dt><dd id="cached-detail">—</dd></div>
+            <div><dt>输出 Token</dt><dd id="output-detail">—</dd></div>
+            <div><dt>推理输出<small>计入输出</small></dt><dd id="reasoning-detail">—</dd></div>
+          </dl>
+          <div class="fold-time"><span>上一轮耗时 / 首 Token</span><strong id="time-detail">—</strong></div>
+        </div>
+      </details>
+      <details class="detail-extra" id="detail-usage">
+        <summary><span>用量来源与模型</span><small id="usage-fold-summary"></small></summary>
+        <div class="disclosure-body" id="usage-details"></div>
+      </details>
+      <details class="detail-extra" id="detail-tools">
+        <summary><span>工具分类</span><small id="tools-fold-summary"></small></summary>
+        <div class="disclosure-body"><div class="tool-breakdown" id="turn-tool-breakdown"></div><div class="tool-breakdown" id="tool-breakdown"></div></div>
+      </details>
+      <details class="detail-extra" id="detail-explanation">
+        <summary><span>指标说明</span><small>速度与统计口径</small></summary>
+        <div class="disclosure-body fold-glossary">
+          <div><strong>轮次均速</strong><p id="speed-note">平均速度包含工具执行和多次模型调用。</p></div>
+          <div><strong>上下文与累计</strong><p>上下文取最新请求的窗口占用。会话累计汇总本聊天各模型的输入和输出。</p></div>
+          <div><strong>数据范围</strong><p>用量来自本地日志。缓存输入和推理输出分别包含在输入和输出中，套餐额度以 Codex 为准。</p></div>
+          <div id="state-details" hidden><strong>当前提示</strong><ul></ul></div>
+        </div>
+      </details>
       </div>
       <div id="models-panel" role="tabpanel" aria-labelledby="tab-models" hidden>
         <div class="model-picker" id="model-picker" role="tablist" aria-label="已记录模型"></div>
         <p class="model-page-meta" id="model-page-meta"></p>
         <p class="settings-note" id="model-page-empty" hidden>当前聊天尚无可展示的模型记录。</p>
-        <div class="numbers" id="model-page-numbers" role="tabpanel" aria-label="选中模型用量">
-          <div><span>模型累计 <small>输入＋输出</small></span><strong id="model-total">—</strong></div>
-          <div><span>输入 Token</span><strong id="model-input">—</strong></div>
-          <div><span>缓存输入 <small>已包含在输入中</small></span><strong id="model-cached">—</strong></div>
-          <div><span>输出 Token</span><strong id="model-output">—</strong></div>
-          <div><span>推理输出 <small>已包含在输出中</small></span><strong id="model-reasoning">—</strong></div>
-          <div><span>已记录请求</span><strong id="model-requests">—</strong></div>
+        <div class="monitor-kpis model-kpis" id="model-page-numbers" role="tabpanel" aria-label="选中模型用量">
+          <div data-tone="teal"><span class="semantic-key">模型累计</span><strong id="model-total">—</strong></div>
+          <div data-tone="amber"><span class="semantic-key">输入 Token</span><strong id="model-input">—</strong></div>
+          <div data-tone="blue"><span class="semantic-key">缓存输入 <small>计入输入</small></span><strong id="model-cached">—</strong></div>
+          <div data-tone="teal"><span class="semantic-key">输出 Token</span><strong id="model-output">—</strong></div>
+          <div data-tone="violet"><span class="semantic-key">推理输出 <small>计入输出</small></span><strong id="model-reasoning">—</strong></div>
+          <div data-tone="blue"><span class="semantic-key">已记录请求</span><strong id="model-requests">—</strong></div>
         </div>
-        <p class="settings-note model-page-note">各页仅展示当前聊天中可归属的模型用量，切页不改变浮条累计。当前上下文、轮次速度与工具记录在总览中查看。</p>
       </div>
-      <div id="activity-panel" role="tabpanel" aria-labelledby="tab-activity" hidden><div id="activity-chart"></div><p class="settings-note">当前聊天近一年的每日 Token 用量，汇总该聊天的全部模型。仅按日志中可归属日期的记录统计，历史未归属用量不摊入日历；无记录的日期不代表实际未使用。</p></div>
-      <div class="detail-footer"><span id="updated">只读本地日志</span><button class="btn" data-action="refresh">刷新</button></div>
+      <div id="activity-panel" role="tabpanel" aria-labelledby="tab-activity" hidden>
+        <div class="activity-controls">
+          <label>范围 <select id="activity-scope"><option value="chat">当前聊天</option><option value="all">全部本地聊天</option></select></label>
+          <div class="period-choices" id="activity-period" role="group" aria-label="统计时段">
+            <button type="button" data-days="7" aria-pressed="false">7 天</button>
+            <button type="button" data-days="30" aria-pressed="false">30 天</button>
+            <button type="button" data-days="365" aria-pressed="true">近一年</button>
+          </div>
+        </div>
+        <div id="activity-chart"></div>
+      </div>
+      <div id="requests-panel" role="tabpanel" aria-labelledby="tab-requests" hidden><div id="request-view"></div></div>
+      <div class="detail-footer"><span id="updated">只读本地日志</span><button class="btn" data-action="settings">偏好设置</button></div>
     </section>
   </main>
   <script src="snapshot-guard.js"></script>
   <script src="usage-details.js"></script>
   <script src="activity-grid.js"></script>
+  <script src="metric-options.js"></script>
+  <script src="request-details.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

@@ -3,24 +3,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { UUID } = require('./codex-ipc.cjs');
 const { cleanProfiles } = require('./display-position.cjs');
+const { versionParts } = require('./diagnostics.cjs');
+const { metrics, defaultOrder, orderedIds } = require('./ui/metric-options.js');
 
 const DEFAULTS = Object.freeze({
   theme: 'system', placement: 'top-right', scale: 1, opacity: 1, alwaysVisible: false,
-  showSpeed: true, showContext: true, showSession: true, showTurn: false,
+  showSpeed: true, showContext: true, showTtft: false, showSession: true, showTurn: false, metricOrder: defaultOrder,
   showToday: false, showCache: false, showTools: false, pinnedThreadId: null, contextOverride: null,
   offsetX: 0, offsetY: 0, allowDrag: false, hideLabels: false,
   rememberDisplayPositions: true, displayPositions: [], desktopCompatibility: true, dockToComposer: false, composerAlignment: 'center', dockTarget: 'composer',
+  updateMode: 'badge', lastNotifiedRelease: null,
 });
 
 function cleanSettings(input, previous = DEFAULTS) {
   const result = { ...previous };
   if (!input || typeof input !== 'object') return result;
-  for (const key of ['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools', 'alwaysVisible', 'allowDrag', 'hideLabels', 'rememberDisplayPositions', 'desktopCompatibility', 'dockToComposer']) {
+  for (const key of [...metrics.map(metric => metric.setting), 'alwaysVisible', 'allowDrag', 'hideLabels', 'rememberDisplayPositions', 'desktopCompatibility', 'dockToComposer']) {
     if (typeof input[key] === 'boolean') result[key] = input[key];
   }
   if (['system', 'dark', 'light'].includes(input.theme)) result.theme = input.theme;
   if (['center', 'left', 'right'].includes(input.composerAlignment)) result.composerAlignment = input.composerAlignment;
   if (['composer', 'titlebar'].includes(input.dockTarget)) result.dockTarget = input.dockTarget;
+  if (['badge', 'popup', 'manual'].includes(input.updateMode)) result.updateMode = input.updateMode;
+  if (typeof input.lastNotifiedRelease === 'string' && versionParts(input.lastNotifiedRelease)) result.lastNotifiedRelease = input.lastNotifiedRelease;
   if (['top-right', 'bottom-right', 'bottom-center'].includes(input.placement)) result.placement = input.placement;
   if (Number.isFinite(input.scale)) result.scale = Math.max(0.75, Math.min(1.5, input.scale));
   if (Number.isFinite(input.opacity)) result.opacity = Math.round(Math.max(0.2, Math.min(1, input.opacity)) * 100) / 100;
@@ -28,7 +33,8 @@ function cleanSettings(input, previous = DEFAULTS) {
   if (input.contextOverride === null || Number.isSafeInteger(input.contextOverride) && input.contextOverride >= 1000 && input.contextOverride <= 10000000) result.contextOverride = input.contextOverride;
   for (const key of ['offsetX', 'offsetY']) if (Number.isFinite(input[key])) result[key] = Math.max(-20000, Math.min(20000, Math.round(input[key])));
   if (Object.hasOwn(input, 'displayPositions')) result.displayPositions = cleanProfiles(input.displayPositions);
-  if (!['showSpeed', 'showContext', 'showSession', 'showTurn', 'showToday', 'showCache', 'showTools'].some(key => result[key])) result.showContext = true;
+  if (Array.isArray(input.metricOrder)) result.metricOrder = orderedIds(input.metricOrder);
+  if (!metrics.some(metric => result[metric.setting])) result.showContext = true;
   return result;
 }
 

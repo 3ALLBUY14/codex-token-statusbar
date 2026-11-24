@@ -15,6 +15,7 @@
       let row = existing.get(key);
       if (!row) {
         row = document.createElement('li'); row.dataset.key = key;
+        row.dataset.toolType = record.type;
         const heading = document.createElement('div'); heading.className = 'tool-record-top';
         const name = document.createElement('strong'), status = document.createElement('span');
         status.className = 'tool-record-status'; heading.append(name, status);
@@ -22,6 +23,7 @@
       }
       text(row.querySelector('strong'), `${running ? '' : '#' + count(record.sequence) + ' '}${record.name ?? record.label}${record.name ? ' · ' + record.label : ''}`);
       const status = row.querySelector('span'); status.classList.toggle('failed', record.status === 'failed');
+      status.classList.toggle('running', running);
       text(status, running ? '执行中' : record.status === 'failed' ? '失败' : '已完成');
       const timestamp = record.timestamp ? new Date(record.timestamp).toLocaleString('zh-CN', { hour12: false }) : '时间未记录';
       const elapsed = record.timestamp ? Math.max(0, Date.now() - Date.parse(record.timestamp)) : null;
@@ -61,7 +63,8 @@
     const visible = [...all].reverse().filter(record => matches(record) && (!failed || record.status === 'failed'));
     if ($('tool-sort').value === 'duration') visible.sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1));
     const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE)); page = Math.min(page, pages - 1);
-    text($('tool-record-note'), `最近 ${all.length} 条 / 累计 ${count(stats?.total ?? 0)} 次；筛选仅作用于最近记录（最多 200 条）。`);
+    text($('tool-record-note'), `最近 ${all.length} 条 · 累计 ${count(stats?.total ?? 0)} 次`);
+    $('tool-record-note').title = '筛选只应用于最近保留的记录，最多 200 条。';
     records($('settings-tool-records'), visible.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
     const pending = failed ? [] : running.filter(matches);
     $('running-heading').hidden = !pending.length;

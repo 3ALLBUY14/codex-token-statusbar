@@ -4,6 +4,7 @@ const fs = require('node:fs/promises'), os = require('node:os'), path = require(
 const { SessionStore } = require('../src/session-store.cjs');
 const { SnapshotGuard } = require('../src/ui/snapshot-guard.js');
 const { diagnosticState } = require('../src/diagnostics.cjs');
+const { localDay } = require('../src/metrics.cjs');
 const root = '00000000-0000-0000-0000-000000000001', child = '00000000-0000-0000-0000-000000000002';
 const stamp = new Date().toISOString();
 const event = (type, payload) => JSON.stringify({ type, timestamp: stamp, payload }) + '\n';
@@ -90,6 +91,47 @@ test('model counter inconsistencies never fabricate component totals to match a 
   const s = snapshot(store); assert.equal(s.session.totals.total_tokens, 1010);
   const unassigned = s.session.accounting.byModel.find(x => x.model.includes('历史未归属'));
   assert.equal(unassigned.total_tokens, 960); assert.equal(unassigned.input_tokens, null); assert.equal(unassigned.output_tokens, null);
+});
+test('global activity counts dated requests once and separates dated legacy usage from missing history', async t => {
+  const recorded = response(root, 'recorded', 100, { model: 'main', thread_token_usage: usage(1000) });
+  const { store } = await fixture(t, {
+    original: meta(root) + recorded + response(child, 'child-response', 200, { session_id: root, model: 'copy' }),
+    overlap: meta(root) + recorded,
+    child: meta(child, root) + response(child, 'child-response', 200, { model: 'worker' }),
+    legacy: meta('00000000-0000-0000-0000-000000000003') + event('event_msg', { type: 'token_count', info: { total_token_usage: usage(40), last_token_usage: usage(40) } }),
+  });
+  const state = snapshot(store);
+  const today = state.allActivity.days.find(row => row.date === localDay(stamp));
+  assert.equal(today.tokens, 370);
+  assert.equal(state.today.usage.total_tokens, today.tokens);
+  assert.deepEqual(Object.fromEntries(today.byModel.map(row => [row.model, row.tokens])), { main: 110, worker: 210, '模型未记录': 50 });
+  assert.equal(state.session.accounting.activity.days[0].tokens, 110);
+  assert.equal(state.allActivity.partial, true);
+});
+test('request details page by date and model, and do not borrow timing or token fields from a turn', async t => {
+  const earlier = new Date(stamp);
+  earlier.setDate(earlier.getDate() - 1);
+  const tokens = { input_tokens: 30, output_tokens: 4 };
+  const first = JSON.stringify({ type: 'token_usage_record', timestamp: earlier.toISOString(), payload: { thread_id: root, response_id: 'earlier', turn_id: 'earlier-turn', model: 'A', usage: tokens, duration_ms: 750 } }) + '\n';
+  const later = Array.from({ length: 21 }, (_, index) => response(root, `r-${index}`, 100, { model: 'B' })).join('');
+  const undated = JSON.stringify({ type: 'token_usage_record', timestamp: null, payload: { thread_id: root, response_id: 'undated', usage: tokens } }) + '\n';
+  const { store } = await fixture(t, { one: meta(root) + first + later + later + undated + event('event_msg', { type: 'task_complete', turn_id: 'turn', duration_ms: 1000, time_to_first_token_ms: 400 }) });
+  const state = snapshot(store);
+  assert.equal(state.session.accounting.activity.partial, true);
+  const request = store.modelRequests(root, { model: 'A', start: localDay(earlier), end: localDay(earlier) });
+  assert.equal(request.total, 23);
+  assert.equal(request.matches, 1);
+  assert.equal(request.records[0].turnId, 'earlier-turn');
+  assert.equal(request.records[0].durationMs, 750);
+  assert.equal(request.records[0].firstTokenMs, null);
+  assert.equal(request.records[0].usage.cached_input_tokens, null);
+  assert.equal(request.records[0].usage.reasoning_output_tokens, null);
+  const secondPage = store.modelRequests(root, { model: 'B', end: localDay(stamp), page: 1 });
+  assert.equal(secondPage.matches, 21);
+  assert.equal(secondPage.records.length, 1);
+  assert.equal(secondPage.records[0].durationMs, null);
+  assert.equal(secondPage.records[0].firstTokenMs, null);
+  assert.equal(store.modelRequests(root, { start: localDay(earlier) }).matches, 22);
 });
 test('snapshot ordering rejects stale chats, mismatched data, old epochs and duplicate deliveries', () => {
   const guard = new SnapshotGuard(), state = (id, sequence, epoch) => ({ selection: { threadId: id }, session: { threadId: id }, delivery: { sequence, epoch } });

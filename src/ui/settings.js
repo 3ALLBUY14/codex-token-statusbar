@@ -4,21 +4,173 @@ const $ = id => document.getElementById(id);
 const snapshotGuard = new SnapshotGuard();
 let current, pane = 'display', chatPage = 0, chatContext = '', lastChatRender = '', resetPatch = null;
 let saveGeneration = 0, saveTimer = null, failedSave = null;
+let draggedMetric = null, savingMetricOrder = false;
+let checkingUpdate = false, manualUpdate = null, updateActionError = '';
+const updateNotes = {
+  badge: '启动后及每隔 24 小时向 GitHub 查询版本。有新版时，浮条齿轮会亮起。',
+  popup: '自动检查并为每个新版弹出一次 Windows 通知，浮条齿轮也会亮起。',
+  manual: '点击「检查更新」时向 GitHub 查询版本。',
+};
+const viewTitles = { display: '浮条外观', metrics: '浮条指标', position: '贴靠与位置', chat: '聊天与上下文', tools: '工具记录', requests: '模型请求', diagnostics: '运行诊断' };
+const wideSettings = matchMedia('(min-width: 620px)');
+const updateOrientation = () => document.querySelector('.settings-tabs').setAttribute('aria-orientation', wideSettings.matches ? 'vertical' : 'horizontal');
+wideSettings.addEventListener('change', updateOrientation);
+updateOrientation();
+const previewSamples = {
+  speed: ['均速', '28.4 t/s'], context: ['上下文', '44.3%'], ttft: ['首 Token', '2.0s'],
+  session: ['会话', '1.84M'], turn: ['本轮', '86.4K'], today: ['今日', '6.28M'], cache: ['缓存', '79%'], tools: ['工具', '17'],
+};
+let lastPreview = '';
+const preferenceChoices = [...document.querySelectorAll('[data-choice-for]')];
+for (const group of preferenceChoices) {
+  const select = $(group.dataset.choiceFor);
+  for (const option of select.options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.value = option.value;
+    button.textContent = option.textContent;
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () => {
+      if (button.getAttribute('aria-pressed') === 'true') return;
+      select.value = option.value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    group.append(button);
+  }
+}
+function renderAppearance(settings) {
+  const order = MetricOptions.orderedIds(settings.metricOrder);
+  const shown = order.filter(id => settings[MetricOptions.metrics.find(metric => metric.id === id).setting]);
+  $('metric-enabled-count').textContent = `已显示 ${shown.length} / ${order.length}`;
+  const capsule = $('appearance-capsule');
+  capsule.style.setProperty('--preview-scale', String(settings.scale ?? 1));
+  capsule.classList.toggle('preview-hide-labels', Boolean(settings.hideLabels));
+  if (lastPreview === shown.join(',')) return;
+  lastPreview = shown.join(',');
+  const metrics = shown.map(id => {
+    const metric = document.createElement('span'), label = document.createElement('small'), value = document.createElement('b');
+    label.textContent = previewSamples[id][0];
+    value.textContent = previewSamples[id][1];
+    metric.append(label);
+    if (id === 'context') {
+      const ring = document.createElement('i');
+      ring.className = 'context-ring ok';
+      ring.style.setProperty('--context-fill', previewSamples.context[1]);
+      ring.setAttribute('aria-hidden', 'true');
+      metric.append(ring);
+    }
+    metric.append(value);
+    return metric;
+  });
+  $('appearance-metrics').replaceChildren(...metrics);
+}
+const metricList = $('metric-order'), metricRows = new Map();
+for (const { id, setting, label } of MetricOptions.metrics) {
+  const row = document.createElement('li'), handle = document.createElement('span');
+  handle.className = 'metric-handle';
+  handle.textContent = '⠿';
+  handle.draggable = true;
+  handle.title = '拖动调整顺序';
+  handle.setAttribute('aria-hidden', 'true');
+  handle.addEventListener('dragstart', event => {
+    if (savingMetricOrder || !current) { event.preventDefault(); return; }
+    draggedMetric = id;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', id);
+  });
+  const checkbox = document.createElement('input'), option = document.createElement('label');
+  checkbox.type = 'checkbox';
+  checkbox.dataset.setting = setting;
+  option.append(checkbox, label);
+  row.append(handle, option);
+  for (const [offset, symbol, move] of [[-1, '↑', '上移'], [1, '↓', '下移']]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'action-button';
+    button.textContent = symbol;
+    button.setAttribute('aria-label', `${move}${label}`);
+    button.addEventListener('click', () => {
+      const order = MetricOptions.orderedIds(current?.settings.metricOrder);
+      void moveMetric(id, order.indexOf(id) + offset);
+    });
+    row.append(button);
+  }
+  row.addEventListener('dragover', event => {
+    if (!draggedMetric || draggedMetric === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    row.classList.add('drop-target');
+  });
+  row.addEventListener('dragleave', event => { if (!row.contains(event.relatedTarget)) row.classList.remove('drop-target'); });
+  row.addEventListener('drop', event => {
+    event.preventDefault();
+    row.classList.remove('drop-target');
+    if (draggedMetric) void moveMetric(draggedMetric, MetricOptions.orderedIds(current.settings.metricOrder).indexOf(id));
+  });
+  metricRows.set(id, row);
+  metricList.append(row);
+}
+metricList.addEventListener('dragend', () => {
+  draggedMetric = null;
+  for (const row of metricRows.values()) row.classList.remove('drop-target');
+});
+function showMetricOrder(order) {
+  const focused = document.activeElement;
+  const focusedRow = metricList.contains(focused) ? focused.closest('li') : null;
+  order.forEach((id, index) => {
+    const row = metricRows.get(id);
+    if (metricList.children[index] !== row) metricList.insertBefore(row, metricList.children[index] ?? null);
+    row.children[2].disabled = index === 0;
+    row.children[3].disabled = index === order.length - 1;
+  });
+  if (focusedRow && (focused.disabled || focused !== document.activeElement)) {
+    const target = focused.disabled ? focusedRow.querySelector('button:not(:disabled)') : focused;
+    target?.focus({ preventScroll: true });
+  }
+}
+async function moveMetric(id, target) {
+  if (!current || savingMetricOrder) return;
+  const order = [...MetricOptions.orderedIds(current.settings.metricOrder)], start = order.indexOf(id);
+  if (start < 0 || target < 0 || target >= order.length || target === start) return;
+  order.splice(start, 1);
+  order.splice(target, 0, id);
+  resetPatch = null;
+  $('undo-reset').hidden = true;
+  $('reset-message').textContent = '';
+  await saveAction(async () => {
+    savingMetricOrder = true;
+    try { await api.setSettings({ metricOrder: order }); }
+    finally { savingMetricOrder = false; }
+  });
+}
 const labels = { following: '跟随当前聊天', recent: '当前聊天未绑定，显示最近活跃聊天', pinned: '已锁定聊天', ambiguous: '多个窗口或同名聊天，请选择聊天', empty: '当前页面暂无本地聊天数据', unbound: '等待首次聊天记录' };
 function showPane(name) {
-  if (!['display', 'chat', 'tools', 'diagnostics'].includes(name)) return;
+  if (!Object.hasOwn(viewTitles, name)) return;
   pane = name;
+  $('settings-pane-title').textContent = viewTitles[name];
   for (const button of document.querySelectorAll('[data-tab]')) { const selected = button.dataset.tab === name; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; }
   for (const panel of document.querySelectorAll('[data-pane]')) panel.hidden = panel.dataset.pane !== name;
   api.toolInterest(name === 'tools');
-  window.scrollTo(0, 0);
+  window.requestPanel.update(current, name === 'requests');
+  $('settings-scroll').scrollTop = 0;
+}
+function renderUpdateStatus() {
+  const update = current?.update?.checking ? current.update : manualUpdate ?? current?.update;
+  const busy = checkingUpdate || Boolean(update?.checking);
+  const available = current?.update?.newer || update?.newer;
+  const status = $('update-status');
+  const text = busy ? '正在检查 GitHub 发布…' : updateActionError || (update?.newer ? `发现新版 ${update.tag}` : update?.ok ? `已是最新版本 · ${update.tag}` : update?.message ?? '尚未检查更新');
+  if (status.textContent !== text) status.textContent = text;
+  status.classList.toggle('available', Boolean(!busy && update?.newer && !updateActionError));
+  $('check-update').disabled = busy;
+  $('open-release').classList.toggle('update-download', Boolean(available));
 }
 for (const tab of document.querySelectorAll('[data-tab]')) {
   tab.addEventListener('click', () => showPane(tab.dataset.tab));
   tab.addEventListener('keydown', event => {
     const tabs = [...document.querySelectorAll('[data-tab]')]; let index = tabs.indexOf(tab);
-    if (event.key === 'ArrowRight') index = (index + 1) % tabs.length;
-    else if (event.key === 'ArrowLeft') index = (index + tabs.length - 1) % tabs.length;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') index = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') index = (index + tabs.length - 1) % tabs.length;
     else if (event.key === 'Home') index = 0;
     else if (event.key === 'End') index = tabs.length - 1;
     else return;
@@ -48,6 +200,13 @@ function renderChats() {
 api.onSnapshot(state => {
   if (!snapshotGuard.accept(state)) return;
   current = state; document.documentElement.classList.toggle('light', !state.dark);
+  const appIcon = $('settings-app-icon');
+  if (state.appIconName && !appIcon.hasAttribute('src')) appIcon.src = `../../assets/icons/${state.appIconName}.svg`;
+  if (!checkingUpdate && state.update?.ok) manualUpdate = null;
+  $('update-mode-note').textContent = updateNotes[state.settings.updateMode] ?? '';
+  renderUpdateStatus();
+  showMetricOrder(MetricOptions.orderedIds(state.settings.metricOrder));
+  renderAppearance(state.settings);
   renderUsageDetails($('settings-usage-details'), state.session);
   $('diag-state').textContent = state.diagnostic?.label ?? '正在检查';
   $('diag-state-note').textContent = state.diagnostic?.detail ?? '';
@@ -56,14 +215,19 @@ api.onSnapshot(state => {
     const value = state.settings[input.dataset.setting];
     if (input.type === 'checkbox') input.checked = value; else input.value = input.id === 'opacity' ? Math.round((value ?? 1) * 100) : value ?? '';
   }
+  for (const group of preferenceChoices) {
+    const selected = $(group.dataset.choiceFor).value;
+    for (const button of group.children) button.setAttribute('aria-pressed', String(button.dataset.value === selected));
+  }
   opacityLabel();
   $('composer-alignment').disabled = !state.settings.dockToComposer;
   $('dock-target').disabled = !state.settings.dockToComposer;
   for (const key of ['placement', 'allowDrag', 'offsetX', 'offsetY', 'alwaysVisible', 'rememberDisplayPositions']) document.querySelector(`[data-setting="${key}"]`).disabled = state.settings.dockToComposer;
   const titlebar = state.settings.dockTarget === 'titlebar';
   const docking = { titlebar: '已贴靠标题栏内，明细向下展开', below: '已贴靠输入框下方', above: '下方空间不足，已贴靠上方', waiting: `等待识别${titlebar ? '标题栏空白区域' : '输入框'}，浮条暂时隐藏`, 'host-hidden': 'Codex 不在前台，贴靠浮条已隐藏' };
-  $('composer-note').textContent = state.settings.dockToComposer ? `${docking[state.runtime?.composerDock] ?? '正在识别贴靠区域'}。暂停自由拖动和位置偏移；关闭后恢复原浮动位置。` : '标题栏模式避开菜单与窗口按钮，明细向下展开；输入框模式优先放下方，空间不足放上方。离开 Codex 或区域未识别时隐藏。';
+  $('composer-note').textContent = state.settings.dockToComposer ? `${docking[state.runtime?.composerDock] ?? '正在识别贴靠区域'}。关闭贴靠可恢复自由浮动。` : '标题栏内向下展开，输入框附近随空间调整位置。';
   renderChats(); window.toolPanel.update(state);
+  window.requestPanel.update(state, pane === 'requests');
   $('connection').textContent = `${state.selection.connected ? '已连接 · ' : ''}${labels[state.selection.mode]} · ${state.health.sessionCount} 个本地聊天`;
   const runtime = state.runtime ?? {};
   $('diag-version').textContent = runtime.version ?? '—';
@@ -113,6 +277,7 @@ function opacityLabel() {
   const value = `${$('opacity').value}%`;
   $('opacity-value').textContent = value;
   $('opacity').setAttribute('aria-valuetext', value);
+  $('appearance-capsule').style.opacity = Number($('opacity').value) / 100;
 }
 $('opacity').addEventListener('input', () => { opacityLabel(); api.previewOpacity(Number($('opacity').value) / 100); });
 $('opacity').addEventListener('keydown', event => {
@@ -136,22 +301,52 @@ $('chat').addEventListener('blur', renderChats);
 $('chat-prev').addEventListener('click', () => { chatPage--; renderChats(); });
 $('chat-next').addEventListener('click', () => { chatPage++; renderChats(); });
 $('open-tool-details').addEventListener('click', event => { event.preventDefault(); showPane('tools'); });
+for (const link of document.querySelectorAll('.settings-links a')) {
+  link.addEventListener('click', async event => {
+    event.preventDefault();
+    $('settings-link-status').textContent = '';
+    try { await api.openSettingsLink(link.href); }
+    catch { $('settings-link-status').textContent = '未能打开浏览器'; }
+  });
+}
 $('refresh').addEventListener('click', () => api.refresh());
 $('restore-position').addEventListener('click', () => { void saveAction(() => api.restorePosition()); });
 $('quit').addEventListener('click', () => api.quit());
 $('reset').addEventListener('click', async () => {
   if (!current) return;
-  const defaults = { theme: 'system', scale: 1, opacity: 1, showSpeed: true, showContext: true, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: false };
+  const defaults = { theme: 'system', scale: 1, opacity: 1, showSpeed: true, showContext: true, showTtft: false, showSession: true, showTurn: false, showToday: false, showCache: false, showTools: false, hideLabels: false, metricOrder: MetricOptions.defaultOrder };
   const previous = Object.fromEntries(Object.keys(defaults).map(key => [key, current.settings[key]]));
   if (await save(defaults)) { resetPatch = previous; $('undo-reset').hidden = false; $('reset-message').textContent = '显示项已恢复默认，聊天锁定、窗口容量和浮条位置保留。'; }
 });
 $('undo-reset').addEventListener('click', async () => { if (resetPatch && await save(resetPatch)) { resetPatch = null; $('undo-reset').hidden = true; $('reset-message').textContent = '已撤销恢复默认显示。'; } });
 $('copy-diagnostics').addEventListener('click', async () => { try { await api.copyDiagnostics(); $('diagnostic-action-status').textContent = '诊断已复制，可粘贴给开发者。'; } catch { $('diagnostic-action-status').textContent = '未能复制诊断，请稍后重试。'; } });
 $('check-update').addEventListener('click', async () => {
-  $('check-update').disabled = true; $('diagnostic-action-status').textContent = '正在检查 GitHub 发布…';
-  try { const result = await api.checkUpdate(); $('diagnostic-action-status').textContent = !result.ok ? result.message : result.newer ? `发现 ${result.tag}，点击“打开下载页”下载。` : `GitHub 最新发布 ${result.tag}，当前 ${current?.runtime?.version ?? ''}。`; }
-  catch { $('diagnostic-action-status').textContent = '暂时无法检查更新，可直接打开下载页。'; }
-  finally { $('check-update').disabled = false; }
+  checkingUpdate = true;
+  updateActionError = '';
+  renderUpdateStatus();
+  try {
+    const result = await api.checkUpdate();
+    if (result.ok) manualUpdate = result;
+    else updateActionError = result.message;
+  } catch { updateActionError = '暂时无法检查更新，可直接打开下载页。'; }
+  finally {
+    checkingUpdate = false;
+    renderUpdateStatus();
+  }
 });
-$('open-release').addEventListener('click', async () => { try { await api.openRelease(); } catch { $('diagnostic-action-status').textContent = '无法打开浏览器，请手动访问 GitHub 发布页。'; } });
+$('open-release').addEventListener('click', async () => {
+  updateActionError = '';
+  try { await api.openRelease(); }
+  catch { updateActionError = '无法打开浏览器，请手动访问 GitHub 发布页。'; }
+  renderUpdateStatus();
+});
+api.onShowUpdates(() => {
+  showPane('diagnostics');
+  $('update-heading').focus({ preventScroll: true });
+});
+api.onRequestFilters(() => {
+  showPane('requests');
+  $('request-from').closest('details').open = true;
+  $('request-from').focus({ preventScroll: true });
+});
 api.ready();

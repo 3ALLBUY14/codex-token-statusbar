@@ -20,6 +20,7 @@ async function checkOpacity({ overlay, settingsWindow, settings, publish, artifa
     const before = fs.readFileSync(settings.filename, 'utf8');
     await input(65); await pause(250); publish(); await pause(250);
     await expectOpacity(0.65);
+    assert.equal(await ui('Number(getComputedStyle(document.getElementById("appearance-capsule")).opacity)'), 0.65);
     assert.equal(fs.readFileSync(settings.filename, 'utf8'), before);
     assert.equal(await view('Number(getComputedStyle(document.getElementById("details")).opacity)'), 1);
     await ui('document.getElementById("opacity").dispatchEvent(new KeyboardEvent("keydown", {key:"Escape",bubbles:true}))'); await pause(250);

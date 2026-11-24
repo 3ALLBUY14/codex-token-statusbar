@@ -2,6 +2,8 @@
 const { usageOf, emptyUsage, localDay } = require('./metrics.cjs');
 const { UUID } = require('./codex-ipc.cjs');
 const label = value => typeof value === 'string' && value.length > 0 && value.length <= 128 ? value : null;
+const unknownModel = '模型未记录';
+const timing = value => Number.isFinite(value) && value >= 0 ? value : null;
 const feature = source => /auto_review|guardian_review/.test(typeof source === 'string' ? source : '') ? 'review' : source && typeof source === 'object' && source.subagent ? 'subagent' : null;
 const add = (to, from) => { for (const key of Object.keys(emptyUsage())) to[key] = to[key] === null || from[key] === null ? null : to[key] + from[key]; };
 function cumulativeFloor(...values) {
@@ -55,7 +57,11 @@ class ResponseLedger {
     const model = label(p.model) ?? label(p.model_name) ?? (owned ? models?.size === 1 ? [...models][0] : models?.size > 1 ? null : this.model : null);
     const timestamp = typeof row.timestamp === 'string' && Number.isFinite(Date.parse(row.timestamp)) ? row.timestamp : null;
     const source = feature(p.thread_source) ?? (owned ? this.feature : null) ?? (p.thread_source === 'subagent' || UUID.test(p.session_id ?? '') && thread !== p.session_id ? 'subagent' : owned || p.session_id === thread ? 'task' : 'unknown');
-    const record = { thread, response, usage, model, owned, timestamp, day: localDay(row.timestamp), source, parent: owned ? this.parent : UUID.test(p.session_id ?? '') && p.session_id !== thread ? p.session_id : null, cumulative: usageOf(p.thread_token_usage) };
+    const record = { thread, response, usage, model, owned, timestamp, day: timestamp ? localDay(timestamp) : null, source, parent: owned ? this.parent : UUID.test(p.session_id ?? '') && p.session_id !== thread ? p.session_id : null, cumulative: usageOf(p.thread_token_usage) };
+    Object.assign(record, {
+      turnId: label(p.turn_id), durationMs: timing(p.duration_ms), firstTokenMs: timing(p.time_to_first_token_ms),
+      cachedInput: p.usage.cached_input_tokens ?? null, reasoningOutput: p.usage.reasoning_output_tokens ?? null,
+    });
     const key = thread + ':' + response, old = this.records.get(key);
     if (!old && this.records.size >= 100000) { this.limited = true; return; }
     this.records.set(key, mergeResponse(old, record));
@@ -81,18 +87,24 @@ function buildUsageIndex(files, sessions) {
   }
   for (const record of records.values()) {
     let group = groups.get(record.thread);
-    if (!group) { group = { totals: emptyUsage(), byModel: new Map(), bySource: new Map(), daily: new Map(), requests: 0, partial: Boolean(bad.get(record.thread)), cumulative: 0, checkpoint: null, updatedAt: null }; groups.set(record.thread, group); }
+    if (!group) { group = { totals: emptyUsage(), byModel: new Map(), bySource: new Map(), daily: new Map(), dailyModels: new Map(), records: [], requests: 0, partial: Boolean(bad.get(record.thread)), cumulative: 0, checkpoint: null, updatedAt: null }; groups.set(record.thread, group); }
     if (record.conflict) { group.partial = true; continue; }
     if (record.cumulative && ['input_tokens', 'output_tokens', 'cached_input_tokens', 'reasoning_output_tokens'].every(k => record.cumulative[k] >= record.usage[k])) {
       group.checkpoint = cumulativeFloor(group.checkpoint, record.cumulative) ?? group.checkpoint;
       group.cumulative = group.checkpoint?.total_tokens ?? 0;
     }
     if (!Number.isSafeInteger(group.totals.total_tokens + record.usage.total_tokens)) { group.partial = true; continue; }
-    add(group.totals, record.usage); group.requests++;
+    add(group.totals, record.usage); group.requests++; group.records.push(record);
     if (record.timestamp && (!group.updatedAt || Date.parse(record.timestamp) > Date.parse(group.updatedAt))) group.updatedAt = record.timestamp;
-    const model = record.model ?? '模型未记录', source = record.source;
+    const model = record.model ?? unknownModel, source = record.source;
     for (const [map, key] of [[group.byModel, model], [group.bySource, source]]) { const bucket = map.get(key) ?? { ...emptyUsage(), requests: 0 }; add(bucket, record.usage); bucket.requests++; map.set(key, bucket); }
-    if (record.day) { const day = group.daily.get(record.day) ?? emptyUsage(); add(day, record.usage); group.daily.set(record.day, day); } else group.partial = true;
+    if (record.day) {
+      const day = group.daily.get(record.day) ?? emptyUsage();
+      add(day, record.usage); group.daily.set(record.day, day);
+      const models = group.dailyModels.get(record.day) ?? new Map();
+      models.set(model, (models.get(model) ?? 0) + record.usage.total_tokens);
+      group.dailyModels.set(record.day, models);
+    } else group.partial = true;
   }
   for (const group of groups.values()) group.partial ||= group.cumulative !== 0 && group.cumulative !== group.totals.total_tokens;
   return { groups, parents, bad, legacyTotals };
@@ -123,9 +135,56 @@ function accountingFor(id, index, sessions, previousTotals = new Map()) {
     for (const [rows, map, field] of [[report.byModel, models, 'model'], [report.bySource, sources, 'source']]) for (const row of rows) { const bucket = map.get(row[field]) ?? { [field]: row[field], ...emptyUsage(), requests: 0 }; add(bucket, row); bucket.requests = bucket.requests === null || row.requests === null ? null : bucket.requests + row.requests; map.set(row[field], bucket); }
   }
   related.byModel = [...models.values()].sort((a, b) => b.total_tokens - a.total_tokens); related.bySource = [...sources.values()].sort((a, b) => b.total_tokens - a.total_tokens);
-  const daily = index.groups.get(id)?.daily ?? tails.get(id)?.accumulator.daily ?? new Map();
-  const days = [...daily].map(([date, usage]) => ({ date, tokens: usage.total_tokens })).sort((a,b) => a.date.localeCompare(b.date));
-  const activity = { days, partial: current.partial || days.reduce((n,row) => n+row.tokens,0) < current.totals.total_tokens };
-  return { ...current, activity, related, relatedThreads: included.size - 1 };
+  return { ...current, related, relatedThreads: included.size - 1 };
 }
-module.exports = { ResponseLedger, buildUsageIndex, accountingFor };
+
+function activityFor(index, tails, threadId, now = Date.now()) {
+  const accumulators = new Map(tails.map(tail => [tail.accumulator.id, tail.accumulator]));
+  const ids = threadId ? [threadId] : new Set([...accumulators.keys(), ...index.groups.keys()]);
+  const end = localDay(now), start = new Date(now);
+  start.setDate(start.getDate() - 364);
+  const first = localDay(start), calendar = new Map();
+  let partial = false;
+  for (const id of ids) {
+    const group = index.groups.get(id), accumulator = accumulators.get(id);
+    const daily = group?.daily ?? accumulator?.daily;
+    const checkpoint = index.legacyTotals.get(id)?.total_tokens ?? 0;
+    let dated = 0;
+    for (const [date, usage] of daily ?? []) {
+      dated += usage.total_tokens;
+      if (date < first || date > end) continue;
+      const bucket = calendar.get(date) ?? { date, tokens: 0, models: new Map() };
+      bucket.tokens += usage.total_tokens;
+      const models = group?.dailyModels.get(date) ?? [[unknownModel, usage.total_tokens]];
+      for (const [model, tokens] of models) bucket.models.set(model, (bucket.models.get(model) ?? 0) + tokens);
+      calendar.set(date, bucket);
+    }
+    partial ||= Boolean(group?.partial || index.bad.has(id) || dated < Math.max(checkpoint, group?.totals.total_tokens ?? 0) ||
+      (!group && (accumulator?.usageIncomplete || accumulator?.accountingWarning)));
+  }
+  const days = [...calendar.values()].sort((a, b) => a.date.localeCompare(b.date)).map(({ date, tokens, models }) => ({
+    date, tokens, byModel: [...models].map(([model, tokens]) => ({ model, tokens })),
+  }));
+  return { days, partial };
+}
+
+const requestDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && localDay(`${value}T12:00:00`) === value ? value : '';
+function requestPage(group, filters = {}) {
+  const { model, start, end, page } = filters ?? {};
+  const from = requestDate(start), to = requestDate(end), size = 20;
+  const models = [...(group?.byModel.keys() ?? [])].sort();
+  const selectedModel = models.includes(model) ? model : '';
+  if (group && !group.sortedRecords) {
+    group.sortedRecords = [...group.records].sort((a, b) => (Date.parse(b.timestamp) || 0) - (Date.parse(a.timestamp) || 0));
+  }
+  const matching = (group?.sortedRecords ?? []).filter(row => (!selectedModel || (row.model ?? unknownModel) === selectedModel) &&
+    (!(from || to) || (row.day && (!from || row.day >= from) && (!to || row.day <= to))));
+  const pages = Math.max(1, Math.ceil(matching.length / size));
+  const index = Number.isSafeInteger(page) ? Math.min(pages - 1, Math.max(0, page)) : 0;
+  const records = matching.slice(index * size, (index + 1) * size).map(row => ({
+    id: row.response, turnId: row.turnId, timestamp: row.timestamp, model: row.model ?? unknownModel, durationMs: row.durationMs, firstTokenMs: row.firstTokenMs,
+    usage: { ...row.usage, cached_input_tokens: row.cachedInput, reasoning_output_tokens: row.reasoningOutput },
+  }));
+  return { records, models, model: selectedModel, page: index, pages, matches: matching.length, total: group?.requests ?? 0 };
+}
+module.exports = { ResponseLedger, buildUsageIndex, accountingFor, activityFor, requestPage };

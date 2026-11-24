@@ -41,6 +41,45 @@ function usageOf(value) {
   return usage;
 }
 
+function contextParts(raw, usage, includesReasoning) {
+  if (!usage || !Number.isSafeInteger(raw.input_tokens) || !Number.isSafeInteger(raw.output_tokens) ||
+      raw.total_tokens !== usage.total_tokens) return null;
+  const parts = Number.isSafeInteger(raw.cached_input_tokens)
+    ? { uncached: usage.input_tokens - usage.cached_input_tokens, cached: usage.cached_input_tokens }
+    : { input: usage.input_tokens };
+  if (includesReasoning !== false && Number.isSafeInteger(raw.reasoning_output_tokens)) {
+    parts.output = usage.output_tokens - usage.reasoning_output_tokens;
+    parts.reasoning = usage.reasoning_output_tokens;
+  } else {
+    parts.combinedOutput = usage.output_tokens;
+  }
+  return parts;
+}
+
+function quotaSnapshot(limits, timestamp) {
+  if (!limits || typeof limits !== 'object') return null;
+  return normalizeQuota([limits.primary, limits.secondary].map(window => window && ({
+    percent: window.used_percent, minutes: window.window_minutes, reset: window.resets_at,
+  })), limits.plan_type, limits.limit_name, Date.parse(timestamp));
+}
+
+function normalizeQuota(samples, plan, name, recordedAt) {
+  if (!Number.isFinite(recordedAt)) return null;
+  const windows = [];
+  for (const window of samples) {
+    const percent = window?.percent;
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) continue;
+    const minutes = Number.isSafeInteger(window.minutes) && window.minutes > 0 ? window.minutes : null;
+    const reset = Number.isSafeInteger(window.reset) && window.reset > 0 && window.reset < 8640000000000 ? window.reset * 1000 : null;
+    windows.push({ percent, minutes, reset });
+  }
+  return {
+    recordedAt, windows,
+    plan: typeof plan === 'string' && /^[a-z0-9_-]{1,32}$/.test(plan) ? plan : null,
+    name: typeof name === 'string' ? name.trim().slice(0, 64) : null,
+  };
+}
+
 function localDay(timestamp) {
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return null;
@@ -87,7 +126,8 @@ class SessionAccumulator {
     this.totals = emptyUsage();
     this.contextUsed = null;
     this.contextWindow = null;
-    this.lastUsage = null;
+    this.contextParts = null;
+    this.quota = null;
     this.lastUpdatedAt = null;
     this.hasUsage = false;
     this.activeTurn = null;
@@ -180,7 +220,10 @@ class SessionAccumulator {
       if (Number.isSafeInteger(p.model_context_window) && p.model_context_window > 0) this.contextWindow = p.model_context_window;
       return;
     }
-    if (p.type === 'token_count' && p.info) {
+    if (p.type === 'token_count') {
+      const quota = quotaSnapshot(p.rate_limits, row.timestamp);
+      if (quota && (!this.quota || quota.recordedAt >= this.quota.recordedAt)) this.quota = quota;
+      if (!p.info) return;
       const total = usageOf(p.info.total_token_usage);
       if (!total) return;
       const last = usageOf(p.info.last_token_usage);
@@ -229,9 +272,10 @@ class SessionAccumulator {
       for (const key of TOKEN_FIELDS) this.totals[key] = Math.max(this.totals[key], total[key]);
       this.totals.total_tokens = this.totals.input_tokens + this.totals.output_tokens;
       this.hasUsage = true;
-      this.lastUsage = last;
+      this.contextParts = null;
       if (last && Number.isSafeInteger(p.info.last_token_usage.total_tokens) && p.info.last_token_usage.total_tokens >= 0) {
         this.contextUsed = p.info.last_token_usage.total_tokens;
+        this.contextParts = contextParts(p.info.last_token_usage, last, p.info.last_usage_includes_reasoning);
       }
       if (Number.isSafeInteger(p.info.model_context_window) && p.info.model_context_window > 0) this.contextWindow = p.info.model_context_window;
       this.lastUpdatedAt = row.timestamp ?? null;
@@ -295,6 +339,7 @@ class SessionAccumulator {
         percent: contextPercent,
         ...contextStatus(contextPercent, this.contextWindow),
         exceeded: this.contextExceeded,
+        parts: this.contextParts ? { ...this.contextParts } : null,
       },
       toolUsage: toolSnapshot(this.toolStats, includeRecords),
       turnToolUsage: this.activeTurn ? toolSnapshot(this.activeTurn.toolStats, includeRecords) : this.lastTurn ? { ...this.lastTurn.toolUsage, records: includeRecords ? this.lastTurn.toolUsage.records : [] } : null,
@@ -344,4 +389,4 @@ class JsonlDecoder {
   }
 }
 
-module.exports = { SessionAccumulator, JsonlDecoder, emptyUsage, usageOf, localDay, averageSpeed, contextStatus, toolDurationMs };
+module.exports = { SessionAccumulator, JsonlDecoder, emptyUsage, usageOf, localDay, averageSpeed, contextStatus, toolDurationMs, normalizeQuota };

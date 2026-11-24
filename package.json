@@ -1,9 +1,10 @@
 {
   "name": "codex-token-statusbar",
-  "version": "2.0.1",
-  "displayVersion": "V2.0.1",
+  "version": "3.0.0",
+  "displayVersion": "V3",
   "private": true,
-  "description": "Local, read-only Codex Desktop token and context status bar, adapted from zcode-token-usage-statusbar.",
+  "description": "Windows status bar for Codex Desktop with local token statistics, context breakdown and official account quotas.",
+  "appIcon": "assets/icons/pulse",
   "main": "src/main.cjs",
   "license": "MIT",
   "repository": {

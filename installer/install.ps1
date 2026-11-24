@@ -46,7 +46,7 @@ try {
         $label = New-Object Windows.Forms.Label
         $label.Location = New-Object Drawing.Point(24, 24)
         $label.Size = New-Object Drawing.Size(410, 75)
-        $label.Text = "为 Codex 桌面版显示 Token、上下文和平均输出速度。`r`n安装后打开 Codex 即可使用。`r`n重新安装会保留你的显示设置。"
+        $label.Text = "为 Codex 桌面版显示 Token、上下文、均速和账号额度。`r`n安装后打开 Codex 即可使用。`r`n重新安装会保留你的显示设置。"
         $startupBox = New-Object Windows.Forms.CheckBox
         $startupBox.Location = New-Object Drawing.Point(24, 112)
         $startupBox.AutoSize = $true
